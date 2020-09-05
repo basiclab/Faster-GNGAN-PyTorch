@@ -1,4 +1,5 @@
 import os
+from copy import deepcopy
 
 import torch
 import torch.optim as optim
@@ -7,7 +8,7 @@ from torchvision import datasets, transforms
 from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
-from copy import deepcopy
+
 import models.sngan as models
 import common.losses as losses
 from common.utils import generate_imgs, infiniteloop, set_seed
@@ -94,7 +95,7 @@ def train():
         dataset = datasets.CIFAR10(
             './data', train=True, download=True,
             transform=transforms.Compose([
-                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
             ]))
@@ -103,15 +104,15 @@ def train():
             './data', split='unlabeled', download=True,
             transform=transforms.Compose([
                 transforms.Resize((48, 48)),
+                transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-                transforms.Lambda(lambda x: x + torch.rand_like(x) / 128)
             ]))
 
     consistency_transforms = transforms.Compose([
         transforms.Lambda(lambda x: (x + 1) / 2),
         transforms.ToPILImage(mode='RGB'),
-        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomHorizontalFlip(),
         transforms.RandomAffine(0, translate=(0.2, 0.2)),
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),

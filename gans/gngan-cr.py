@@ -1,4 +1,5 @@
 import os
+from copy import deepcopy
 
 import torch
 import torch.optim as optim
@@ -7,7 +8,6 @@ from torchvision import datasets, transforms
 from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
-from copy import deepcopy
 
 import models.gngan as models
 import common.losses as losses
@@ -112,7 +112,7 @@ def train():
     consistency_transforms = transforms.Compose([
         transforms.Lambda(lambda x: (x + 1) / 2),
         transforms.ToPILImage(mode='RGB'),
-        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomHorizontalFlip(),
         transforms.RandomAffine(0, translate=(0.2, 0.2)),
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
@@ -252,7 +252,6 @@ def train():
                     writer.add_scalar('inception_score_std', is_score[1], step)
                     writer.add_scalar('fid_score', fid_score, step)
                     writer.flush()
-
     writer.close()
 
 
