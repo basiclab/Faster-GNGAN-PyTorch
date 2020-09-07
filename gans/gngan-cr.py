@@ -51,7 +51,7 @@ flags.DEFINE_integer('z_dim', 128, "latent space dimension")
 flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
 flags.DEFINE_bool('scheduler', True, 'apply linearly LR decay')
 flags.DEFINE_integer('seed', 0, "random seed")
-flags.DEFINE_float('alpha', 10, "Consistency penalty")
+flags.DEFINE_float('alpha', 5, "Consistency penalty")
 # logging
 flags.DEFINE_integer('eval_step', 5000, "evaluate FID and Inception Score")
 flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
