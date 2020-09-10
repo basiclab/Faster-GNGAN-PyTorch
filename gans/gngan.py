@@ -19,6 +19,7 @@ net_G_models = {
     'res48': models.ResGenerator48,
     'cnn32': models.Generator32,
     'cnn48': models.Generator48,
+    'res128': models.ResGenerator128,
 }
 
 net_D_models = {
@@ -26,6 +27,7 @@ net_D_models = {
     'res48': models.ResDiscriminator48,
     'cnn32': models.Discriminator32,
     'cnn48': models.Discriminator48,
+    'res128': models.ResDiscriminator128,
 }
 
 loss_fns = {
@@ -38,10 +40,12 @@ loss_fns = {
 
 FLAGS = flags.FLAGS
 # model and training
-flags.DEFINE_enum('dataset', 'cifar10', ['cifar10', 'stl10'], "dataset")
+flags.DEFINE_enum(
+    'dataset', 'cifar10', ['cifar10', 'stl10', 'imagenet'], "dataset")
 flags.DEFINE_enum('arch', 'res32', net_G_models.keys(), "architecture")
 flags.DEFINE_integer('total_steps', 100000, "total number of training steps")
 flags.DEFINE_integer('batch_size', 64, "batch size")
+flags.DEFINE_integer('num_workers', 8, "dataloader workers")
 flags.DEFINE_float('lr_G', 2e-4, "Generator learning rate")
 flags.DEFINE_float('lr_D', 2e-4, "Discriminator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
@@ -49,6 +53,7 @@ flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
 flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
 flags.DEFINE_bool('scheduler', True, 'apply linearly LR decay')
+flags.DEFINE_bool('parallel', False, 'multi-gpu training')
 flags.DEFINE_integer('seed', 0, "random seed")
 # logging
 flags.DEFINE_integer('eval_step', 5000, "evaluate FID and Inception Score")
@@ -106,13 +111,25 @@ def train():
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
             ]))
+    if FLAGS.dataset == 'imagenet':
+        dataset = datasets.ImageFolder(
+            './data/ILSVRC2012/train',
+            transform=transforms.Compose([
+                transforms.Resize((128, 128)),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            ]))
 
     dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=FLAGS.batch_size, shuffle=True, num_workers=4,
-        drop_last=True)
+        dataset, batch_size=FLAGS.batch_size, shuffle=True,
+        num_workers=FLAGS.num_workers, drop_last=True)
 
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
     net_D = models.GradNorm(net_D_models[FLAGS.arch]()).to(device)
+    if FLAGS.parallel:
+        net_G = torch.nn.DataParallel(net_G)
+        net_D = torch.nn.DataParallel(net_D)
     loss_fn = loss_fns[FLAGS.loss]()
 
     optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.lr_G, betas=FLAGS.betas)
@@ -170,16 +187,11 @@ def train():
             # Generator
             z = torch.randn(FLAGS.batch_size * 2, FLAGS.z_dim).to(device)
             x = net_G(z)
-            x.retain_grad()
             loss = loss_fn(net_D(x))
 
             optim_G.zero_grad()
             loss.backward()
             optim_G.step()
-
-            avg_grad_norm = torch.norm(torch.flatten(
-                (x.grad * x.shape[0]), start_dim=1), p=2, dim=1).mean()
-            writer.add_scalar('avg_grad_norm', avg_grad_norm, step)
 
             if FLAGS.scheduler:
                 sched_G.step()
@@ -196,11 +208,19 @@ def train():
 
             if step == 1 or step % FLAGS.eval_step == 0:
                 ckpt = {
-                    'net_G': net_G.state_dict(),
-                    'net_D': net_D.state_dict(),
                     'optim_G': optim_G.state_dict(),
                     'optim_D': optim_D.state_dict(),
                 }
+                if FLAGS.parallel:
+                    ckpt.update({
+                        'net_G': net_G.module.state_dict(),
+                        'net_D': net_D.module.state_dict(),
+                    })
+                else:
+                    ckpt.update({
+                        'net_G': net_G.state_dict(),
+                        'net_D': net_D.state_dict(),
+                    })
                 if FLAGS.scheduler:
                     ckpt.update({
                         'sched_G': sched_G.state_dict(),
@@ -209,7 +229,8 @@ def train():
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
                 if FLAGS.record:
                     imgs = generate_imgs(
-                        net_G, device, FLAGS.z_dim, 50000, FLAGS.batch_size)
+                        net_G, device,
+                        FLAGS.z_dim, FLAGS.num_images, FLAGS.batch_size)
                     is_score, fid_score = get_inception_and_fid_score(
                         imgs, device, FLAGS.fid_cache, verbose=True)
                     pbar.write(
@@ -220,6 +241,7 @@ def train():
                     writer.add_scalar('inception_score', is_score[0], step)
                     writer.add_scalar('inception_score_std', is_score[1], step)
                     writer.add_scalar('fid_score', fid_score, step)
+                    writer.flush()
     writer.close()
 
 
