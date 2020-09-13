@@ -175,9 +175,9 @@ def train():
             break
     aug_real = consistency_transform_func(real)
 
-    grid = (make_grid(real[:FLAGS.sample_size]) + 1) / 2
+    grid = (make_grid(real) + 1) / 2
     writer.add_image('real_sample', grid)
-    grid = (make_grid(aug_real[:FLAGS.sample_size]) + 1) / 2
+    grid = (make_grid(aug_real) + 1) / 2
     writer.add_image('augment_real_sample', grid)
     writer.flush()
 

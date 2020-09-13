@@ -166,8 +166,9 @@ def train():
         if len(real) * FLAGS.batch_size >= FLAGS.sample_size:
             real = torch.cat(real, dim=0)[:FLAGS.sample_size]
             break
-    grid = (make_grid(real[:FLAGS.sample_size]) + 1) / 2
+    grid = (make_grid(real) + 1) / 2
     writer.add_image('real_sample', grid)
+    writer.flush()
 
     looper = infiniteloop(dataloader)
     with trange(1, FLAGS.total_steps + 1, dynamic_ncols=True) as pbar:
