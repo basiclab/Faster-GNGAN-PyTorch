@@ -119,6 +119,7 @@ def train():
         dataset, batch_size=FLAGS.batch_size, shuffle=True,
         num_workers=FLAGS.num_workers, drop_last=True)
 
+    # model
     net_G = net_G_models[FLAGS.arch](
         FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
     if FLAGS.GN:
@@ -135,26 +136,36 @@ def train():
         net_D_G = torch.nn.DataParallel(net_D_G)
     loss_fn = loss_fns[FLAGS.loss]()
 
+    # optimizer
     optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
     optim_D = optim.Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
 
+    # scheduler
     if FLAGS.scheduler:
         sched_G = optim.lr_scheduler.LambdaLR(
             optim_G, lambda step: 1 - step / FLAGS.total_steps)
         sched_D = optim.lr_scheduler.LambdaLR(
             optim_D, lambda step: 1 - step / FLAGS.total_steps)
 
+    # sample fixed z and y
     os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
     writer = SummaryWriter(os.path.join(FLAGS.logdir))
     sample_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
-    sample_y = torch.randint(
-        FLAGS.n_classes, (FLAGS.sample_size,)).to(device)
+    sample_z = torch.split(sample_z, FLAGS.batch_size, dim=0)
+    sample_y = torch.randint(FLAGS.n_classes, (FLAGS.sample_size,)).to(device)
+    sample_y = torch.split(sample_y, FLAGS.batch_size, dim=0)
     with open(os.path.join(FLAGS.logdir, "flagfile.txt"), 'w') as f:
         f.write(FLAGS.flags_into_string())
     writer.add_text(
         "flagfile", FLAGS.flags_into_string().replace('\n', '  \n'))
 
-    real, _ = next(iter(dataloader))
+    # sample real data
+    real = []
+    for x, _ in dataloader:
+        real.append(x)
+        if len(real) * FLAGS.batch_size >= FLAGS.sample_size:
+            real = torch.cat(real, dim=0)[:FLAGS.sample_size]
+            break
     grid = (make_grid(real[:FLAGS.sample_size]) + 1) / 2
     writer.add_image('real_sample', grid)
 
@@ -215,15 +226,17 @@ def train():
             pbar.update(1)
 
             if step == 1 or step % FLAGS.sample_step == 0:
-                # TODO: bachwise
+                fake_imgs = []
                 with torch.no_grad():
-                    fake = net_G(sample_z, sample_y).cpu()
-                    grid = (make_grid(fake) + 1) / 2
+                    for z, y in zip(sample_z, sample_y):
+                        fake = (net_G(z, y).cpu() + 1) / 2
+                        fake_imgs.append(fake)
+                    grid = make_grid(torch.cat(fake_imgs, dim=0))
                 writer.add_image('sample', grid, step)
                 save_image(grid, os.path.join(
                     FLAGS.logdir, 'sample', '%d.png' % step))
 
-            if step % FLAGS.eval_step == 0:
+            if step == 1 or step % FLAGS.eval_step == 0:
                 ckpt = {
                     'optim_G': optim_G.state_dict(),
                     'optim_D': optim_D.state_dict(),

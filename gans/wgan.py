@@ -132,12 +132,18 @@ def train():
     os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
     writer = SummaryWriter(os.path.join(FLAGS.logdir))
     sample_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
+    sample_z = torch.split(sample_z, FLAGS.batch_size, dim=0)
     with open(os.path.join(FLAGS.logdir, "flagfile.txt"), 'w') as f:
         f.write(FLAGS.flags_into_string())
     writer.add_text(
         "flagfile", FLAGS.flags_into_string().replace('\n', '  \n'))
 
-    real, _ = next(iter(dataloader))
+    real = []
+    for x, _ in dataloader:
+        real.append(x)
+        if len(real) * FLAGS.batch_size >= FLAGS.sample_size:
+            real = torch.cat(real, dim=0)[:FLAGS.sample_size]
+            break
     grid = (make_grid(real[:FLAGS.sample_size]) + 1) / 2
     writer.add_image('real_sample', grid)
 
@@ -186,9 +192,12 @@ def train():
             pbar.update(1)
 
             if step == 1 or step % FLAGS.sample_step == 0:
+                fake_imgs = []
                 with torch.no_grad():
-                    fake = net_G(sample_z).cpu()
-                    grid = (make_grid(fake) + 1) / 2
+                    for z in sample_z:
+                        fake = (net_G(z).cpu() + 1) / 2
+                        fake_imgs.append(fake)
+                    grid = make_grid(torch.cat(fake_imgs, dim=0))
                 writer.add_image('sample', grid, step)
                 save_image(grid, os.path.join(
                     FLAGS.logdir, 'sample', '%d.png' % step))
