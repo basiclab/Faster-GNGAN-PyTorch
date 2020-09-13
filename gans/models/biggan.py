@@ -12,14 +12,14 @@ class Attention(nn.Module):
     """
     def __init__(self, ch, sn=spectral_norm):
         super().__init__()
-        self.f = sn(
-            nn.Conv2d(ch, ch // 8, kernel_size=1, padding=0, bias=False))
-        self.g = sn(
-            nn.Conv2d(ch, ch // 8, kernel_size=1, padding=0, bias=False))
-        self.h = sn(
-            nn.Conv2d(ch, ch // 2, kernel_size=1, padding=0, bias=False))
-        self.v = sn(
-            nn.Conv2d(ch // 2, ch, kernel_size=1, padding=0, bias=False))
+        self.f = sn(nn.Conv2d(
+            ch, ch // 8, kernel_size=1, padding=0, bias=False))
+        self.g = sn(nn.Conv2d(
+            ch, ch // 8, kernel_size=1, padding=0, bias=False))
+        self.h = sn(nn.Conv2d(
+            ch, ch // 2, kernel_size=1, padding=0, bias=False))
+        self.v = sn(nn.Conv2d(
+            ch // 2, ch, kernel_size=1, padding=0, bias=False))
         self.gamma = nn.Parameter(torch.tensor(0.), requires_grad=True)
 
     def forward(self, x, y=None):
@@ -138,10 +138,7 @@ class Generator128(nn.Module):
         z_dim = self.chunk_size * num_slots
         shared_input_size = (shared_dim + self.chunk_size)
 
-        # Prepare model
         self.shared_embedding = nn.Embedding(n_classes, shared_dim)
-        # First linear layer
-        print(z_dim)
         self.linear = spectral_norm(
             nn.Linear(z_dim // num_slots, (ch * 16) * 4 * 4))
 
@@ -240,9 +237,9 @@ class Discriminator32(nn.Module):
         self.embedding = sn(nn.Embedding(n_classes, ch * 4))
         weights_init(self)
 
-    def forward(self, x, embedded_y):
+    def forward(self, x, y_embedding):
         h = self.blocks(x).sum(dim=[2, 3])
-        h = self.linear(h) + (embedded_y * h).sum(dim=1, keepdim=True)
+        h = self.linear(h) + (y_embedding * h).sum(dim=1, keepdim=True)
         return h
 
 
@@ -265,9 +262,9 @@ class Discriminator128(nn.Module):
         self.embedding = sn(nn.Embedding(n_classes, ch * 16))
         weights_init(self)
 
-    def forward(self, x, y):
+    def forward(self, x, y_embedding):
         h = self.blocks(x).sum(dim=[2, 3])
-        h = self.linear(h) + (self.embedding(y) * h).sum(dim=1, keepdim=True)
+        h = self.linear(h) + (y_embedding * h).sum(dim=1, keepdim=True)
         return h
 
 
@@ -288,20 +285,20 @@ class DisGen(nn.Module):
                 x_fake = self.net_G(z, y_fake).detach()
             x = torch.cat([x_real, x_fake], dim=0)
             y = torch.cat([y_real, y_fake], dim=0)
-            # if isinstance(self.net_D, GradNorm):
-            #     y = self.net_D.module.embedding(y)
-            # else:
-            #     y = self.net_D.embedding(y)
+            if isinstance(self.net_D, GradNorm):
+                y = self.net_D.module.embedding(y)
+            else:
+                y = self.net_D.embedding(y)
             pred = self.net_D(x, y)
             net_D_real, net_D_fake = torch.split(
                 pred, [x_real.shape[0], x_fake.shape[0]])
             return net_D_real, net_D_fake
         else:
             x_fake = self.net_G(z, y_fake)
-            # if isinstance(self.net_D, GradNorm):
-            #     y_fake = self.net_D.module.embedding(y_fake)
-            # else:
-            #     y_fake = self.net_D.embedding(y_fake)
+            if isinstance(self.net_D, GradNorm):
+                y_fake = self.net_D.module.embedding(y_fake)
+            else:
+                y_fake = self.net_D.embedding(y_fake)
             net_D_fake = self.net_D(x_fake, y_fake)
             return net_D_fake
 

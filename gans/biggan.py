@@ -8,9 +8,11 @@ from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
+import models.gngan as gngan
 import models.biggan as biggan
 import common.losses as losses
-from common.utils import generate_conditional_imgs, infiniteloop, set_seed, module_require_grad
+from common.utils import (
+    generate_conditional_imgs, infiniteloop, set_seed, module_require_grad)
 from common.score.score import get_inception_and_fid_score
 
 
@@ -49,6 +51,7 @@ flags.DEFINE_float('G_lr', 2e-4, "Generator learning rate")
 flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
+flags.DEFINE_bool('GN', False, "enable gradient penalty")
 flags.DEFINE_bool('scheduler', True, 'apply linear learing rate decay')
 flags.DEFINE_bool('parallel', False, 'multi-gpu training')
 flags.DEFINE_integer('seed', 0, "random seed")
@@ -118,8 +121,14 @@ def train():
 
     net_G = net_G_models[FLAGS.arch](
         FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
-    net_D = net_D_models[FLAGS.arch](
-        FLAGS.ch, FLAGS.n_classes).to(device)
+    if FLAGS.GN:
+        # if enable GN, disable all spectral norm in discriminator
+        net_D = net_D_models[FLAGS.arch](
+            FLAGS.ch, FLAGS.n_classes, sn=(lambda x: x)).to(device)
+        net_D = gngan.GradNorm(net_D)
+    else:
+        net_D = net_D_models[FLAGS.arch](
+            FLAGS.ch, FLAGS.n_classes).to(device)
     net_D_G = biggan.DisGen(net_D, net_G)
 
     if FLAGS.parallel:
@@ -154,9 +163,9 @@ def train():
         for step in pbar:
             # Discriminator
             for _ in range(FLAGS.n_dis):
-                # loss_list = []
-                # loss_real_list = []
-                # loss_fake_list = []
+                loss_list = []
+                loss_real_list = []
+                loss_fake_list = []
                 optim_D.zero_grad()
                 for __ in range(FLAGS.D_accumulation):
                     real, y_real = next(looper)
@@ -167,23 +176,23 @@ def train():
                     net_D_real, net_D_fake = net_D_G(z, y, real, y_real)
                     loss, loss_real, loss_fake = loss_fn(
                         net_D_real, net_D_fake)
-                    # loss_list.append(loss.detach())
-                    # loss_real_list.append(loss_real.detach())
-                    # loss_fake_list.append(loss_fake.detach())
+                    loss_list.append(loss.detach())
+                    loss_real_list.append(loss_real.detach())
+                    loss_fake_list.append(loss_fake.detach())
                     loss = loss / float(FLAGS.D_accumulation)
                     loss.backward()
                 optim_D.step()
-                # loss = torch.mean(torch.stack(loss_list))
-                # loss_real = torch.mean(torch.stack(loss_real_list))
-                # loss_fake = torch.mean(torch.stack(loss_fake_list))
+                loss = torch.mean(torch.stack(loss_list))
+                loss_real = torch.mean(torch.stack(loss_real_list))
+                loss_fake = torch.mean(torch.stack(loss_fake_list))
 
-                # if FLAGS.loss == 'was':
-                #     loss = -loss
-                # pbar.set_postfix(loss='%.4f' % loss)
+                if FLAGS.loss == 'was':
+                    loss = -loss
+                pbar.set_postfix(loss='%.4f' % loss)
 
-            # writer.add_scalar('loss', loss.item(), step)
-            # writer.add_scalar('loss_real', loss_real.item(), step)
-            # writer.add_scalar('loss_fake', loss_fake.item(), step)
+            writer.add_scalar('loss', loss.item(), step)
+            writer.add_scalar('loss_real', loss_real.item(), step)
+            writer.add_scalar('loss_fake', loss_fake.item(), step)
 
             # Generator
             with module_require_grad(net_D, False):
@@ -206,8 +215,10 @@ def train():
             pbar.update(1)
 
             if step == 1 or step % FLAGS.sample_step == 0:
-                fake = net_G(sample_z, sample_y).cpu()
-                grid = (make_grid(fake) + 1) / 2
+                # TODO: bachwise
+                with torch.no_grad():
+                    fake = net_G(sample_z, sample_y).cpu()
+                    grid = (make_grid(fake) + 1) / 2
                 writer.add_image('sample', grid, step)
                 save_image(grid, os.path.join(
                     FLAGS.logdir, 'sample', '%d.png' % step))

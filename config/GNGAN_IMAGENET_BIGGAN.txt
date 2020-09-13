@@ -1,8 +1,9 @@
 --arch=biggan128
---ch=64
---batch_size=4
---G_accumulation=1
---D_accumulation=1
+--GN
+--ch=96
+--batch_size=256
+--G_accumulation=8
+--D_accumulation=8
 --dataset=imagenet
 --eval_step=1000
 --fid_cache=./stats/imagenet_train.npz

@@ -46,8 +46,8 @@ flags.DEFINE_enum('arch', 'res32', net_G_models.keys(), "architecture")
 flags.DEFINE_integer('total_steps', 100000, "total number of training steps")
 flags.DEFINE_integer('batch_size', 64, "batch size")
 flags.DEFINE_integer('num_workers', 8, "dataloader workers")
-flags.DEFINE_float('lr_G', 2e-4, "Generator learning rate")
-flags.DEFINE_float('lr_D', 2e-4, "Discriminator learning rate")
+flags.DEFINE_float('G_lr', 2e-4, "Generator learning rate")
+flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
@@ -133,8 +133,8 @@ def train():
         net_D = torch.nn.DataParallel(net_D)
     loss_fn = loss_fns[FLAGS.loss]()
 
-    optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.lr_G, betas=FLAGS.betas)
-    optim_D = optim.Adam(net_D.parameters(), lr=FLAGS.lr_D, betas=FLAGS.betas)
+    optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
+    optim_D = optim.Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
 
     if FLAGS.scheduler:
         sched_G = optim.lr_scheduler.LambdaLR(
@@ -202,8 +202,9 @@ def train():
             pbar.update(1)
 
             if step == 1 or step % FLAGS.sample_step == 0:
-                fake = net_G(sample_z).cpu()
-                grid = (make_grid(fake) + 1) / 2
+                with torch.no_grad():
+                    fake = net_G(sample_z).cpu()
+                    grid = (make_grid(fake) + 1) / 2
                 writer.add_image('sample', grid, step)
                 save_image(grid, os.path.join(
                     FLAGS.logdir, 'sample', '%d.png' % step))

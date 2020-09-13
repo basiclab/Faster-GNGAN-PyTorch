@@ -4,8 +4,8 @@
 --fid_cache=./stats/cifar10_test.npz
 --logdir=./logs/WGANGP_CIFAR10_RES
 --loss=was
---lr_D=0.0002
---lr_G=0.0002
+--D_lr=0.0002
+--G_lr=0.0002
 --n_dis=5
 --scheduler
 --num_images=50000
