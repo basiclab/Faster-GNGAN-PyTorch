@@ -2,21 +2,31 @@ import torch
 import torch.nn as nn
 
 
-class GradNorm(nn.Module):
-    def __init__(self, *modules):
-        super(GradNorm, self).__init__()
-        self.main = nn.Sequential(*modules)
-
-    def forward(self, x):
+def grad_norm(net_D, *args):
+    for x in args:
         x.requires_grad_(True)
-        fx = self.main(x)
-        grad_x = torch.autograd.grad(
-            fx, x, torch.ones_like(fx), create_graph=True,
-            retain_graph=True)[0]
-        grad_norm = torch.norm(grad_x.view(grad_x.size(0), -1), dim=1)
-        grad_norm = grad_norm.view(-1, *[1 for _ in range(len(fx.shape) - 1)])
-        fx = (fx / (grad_norm + torch.abs(fx)))
-        return fx
+    fx = net_D(*args)
+    grads = torch.autograd.grad(
+        fx, args, torch.ones_like(fx), create_graph=True,
+        retain_graph=True)
+    grad_norms = []
+    for grad in grads:
+        grad_norm = (torch.flatten(grad, start_dim=1) ** 2).sum(1)
+        grad_norms.append(grad_norm)
+    grad_norm = torch.sqrt(torch.stack(grad_norms, dim=1).sum(dim=1))
+    grad_norm = grad_norm.view(
+        -1, *[1 for _ in range(len(fx.shape) - 1)])
+    fx = (fx / (grad_norm + torch.abs(fx)))
+    return fx
+
+
+class GradNorm(nn.Module):
+    def __init__(self, module):
+        super(GradNorm, self).__init__()
+        self.module = module
+
+    def forward(self, *args):
+        return grad_norm(self.module, *args)
 
 
 class Generator(nn.Module):
@@ -27,7 +37,7 @@ class Generator(nn.Module):
         self.linear = nn.Linear(self.z_dim, M * M * 512)
         self.main = nn.Sequential(
             nn.BatchNorm2d(512),
-            nn.ReLU(),
+            nn.ReLU(True),
             nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(True),
@@ -299,11 +309,11 @@ class ResDiscriminator128(nn.Module):
 
 def weights_init(m):
     modules = (torch.nn.Conv2d, torch.nn.ConvTranspose2d)
-    for param in m.modules():
-        if isinstance(param, modules):
-            torch.nn.init.kaiming_normal_(param.weight.data)
-            if param.bias is not None:
-                torch.nn.init.zeros_(param.bias.data)
+    for module in m.modules():
+        if isinstance(module, modules):
+            torch.nn.init.kaiming_normal_(module.weight.data)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias.data)
 
 
 def dcgan_weights_init(model):

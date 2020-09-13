@@ -183,7 +183,8 @@ def train():
                 with torch.no_grad():
                     z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
                     fake = net_G(z).detach()
-                real = next(looper)
+                real, _ = next(looper)
+                real = real.to(device)
                 augment_real = consistency_transform_func(real)
                 real = real.to(device)
                 augment_real = augment_real.to(device)

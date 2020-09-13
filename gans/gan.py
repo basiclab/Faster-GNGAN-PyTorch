@@ -140,7 +140,8 @@ def train():
                 with torch.no_grad():
                     z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
                     fake = net_G(z).detach()
-                real = next(looper).to(device)
+                real, _ = next(looper)
+                real = real.to(device)
                 net_D_real = net_D(real)
                 net_D_fake = net_D(fake)
                 loss, loss_real, loss_fake = loss_fn(net_D_real, net_D_fake)

@@ -8,26 +8,21 @@ from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
-import models.sngan as models
+import models.gngan as gngan
+import models.biggan as biggan
 import common.losses as losses
-from common.utils import generate_imgs, infiniteloop, set_seed
+from common.utils import generate_conditional_imgs, infiniteloop, set_seed, module_require_grad
 from common.score.score import get_inception_and_fid_score
 
 
 net_G_models = {
-    'res32': models.ResGenerator32,
-    'res48': models.ResGenerator48,
-    'cnn32': models.Generator32,
-    'cnn48': models.Generator48,
-    'res128': models.ResGenerator128,
+    'biggan32': biggan.Generator32,
+    'biggan128': biggan.Generator128,
 }
 
 net_D_models = {
-    'res32': models.ResDiscriminator32,
-    'res48': models.ResDiscriminator48,
-    'cnn32': models.Discriminator32,
-    'cnn48': models.Discriminator48,
-    'res128': models.ResDiscriminator128,
+    'biggan32': biggan.Discriminator32,
+    'biggan128': biggan.Discriminator128,
 }
 
 loss_fns = {
@@ -40,29 +35,34 @@ loss_fns = {
 
 FLAGS = flags.FLAGS
 # model and training
-flags.DEFINE_enum(
-    'dataset', 'cifar10', ['cifar10', 'stl10', 'imagenet'], "dataset")
-flags.DEFINE_enum('arch', 'res32', net_G_models.keys(), "architecture")
+flags.DEFINE_enum('dataset', 'cifar10', ['cifar10', 'imagenet'], "dataset")
+flags.DEFINE_enum('arch', 'biggan32', net_G_models.keys(), "architecture")
+flags.DEFINE_integer('n_classes', 10, 'the number of classes in dataset')
+flags.DEFINE_integer('ch', 64, 'base channel size of BigGAN')
+flags.DEFINE_integer('z_dim', 128, "latent space dimension")
 flags.DEFINE_integer('total_steps', 100000, "total number of training steps")
 flags.DEFINE_integer('batch_size', 64, "batch size")
 flags.DEFINE_integer('num_workers', 8, "dataloader workers")
-flags.DEFINE_float('lr_G', 2e-4, "Generator learning rate")
-flags.DEFINE_float('lr_D', 2e-4, "Discriminator learning rate")
-flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
+flags.DEFINE_integer('G_accumulation', 1, 'gradient accumulation for G')
+flags.DEFINE_integer('D_accumulation', 1, 'gradient accumulation for D')
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
-flags.DEFINE_integer('z_dim', 128, "latent space dimension")
+flags.DEFINE_float('G_lr', 2e-4, "Generator learning rate")
+flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
+flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
-flags.DEFINE_bool('scheduler', True, 'apply linearly LR decay')
+flags.DEFINE_bool('scheduler', True, 'apply linear learing rate decay')
 flags.DEFINE_bool('parallel', False, 'multi-gpu training')
 flags.DEFINE_integer('seed', 0, "random seed")
 # logging
 flags.DEFINE_integer('eval_step', 5000, "evaluate FID and Inception Score")
 flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
 flags.DEFINE_integer('sample_size', 64, "sampling size of images")
-flags.DEFINE_string('logdir', './logs/SNGAN_CIFAR10_RES', 'log folder')
+flags.DEFINE_string('logdir', './logs/GNGAN_CIFAR10_BIGGAN', 'log folder')
+flags.DEFINE_string('fid_cache', './stats/cifar10_test.npz', 'FID cache')
 flags.DEFINE_bool('record', True, "record inception score and FID score")
-flags.DEFINE_string('fid_cache', './stats/cifar10_stats.npz', 'FID cache')
-# generate
+# flags.DEFINE_integer('max_ckpts', 3, 'the number of recent checkpoints kept')
+
+# generate sample
 flags.DEFINE_bool('generate', False, 'generate images')
 flags.DEFINE_string('pretrain', None, 'path to test model')
 flags.DEFINE_string('output', './outputs', 'path to output dir')
@@ -85,7 +85,8 @@ def generate():
                 0, FLAGS.num_images, FLAGS.batch_size, dynamic_ncols=True):
             batch_size = min(FLAGS.batch_size, FLAGS.num_images - start)
             z = torch.randn(batch_size, FLAGS.z_dim).to(device)
-            x = net_G(z).cpu()
+            y = torch.randint(FLAGS.n_classes, size=(FLAGS.sample_size,))
+            x = net_G(z, y).cpu()
             x = (x + 1) / 2
             for image in x:
                 save_image(
@@ -98,18 +99,9 @@ def train():
         dataset = datasets.CIFAR10(
             './data', train=True, download=True,
             transform=transforms.Compose([
+                transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-                transforms.Lambda(lambda x: x + torch.rand_like(x) / 128)
-            ]))
-    if FLAGS.dataset == 'stl10':
-        dataset = datasets.STL10(
-            './data', split='unlabeled', download=True,
-            transform=transforms.Compose([
-                transforms.Resize((48, 48)),
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-                transforms.Lambda(lambda x: x + torch.rand_like(x) / 128)
             ]))
     if FLAGS.dataset == 'imagenet':
         dataset = datasets.ImageFolder(
@@ -125,15 +117,17 @@ def train():
         dataset, batch_size=FLAGS.batch_size, shuffle=True,
         num_workers=FLAGS.num_workers, drop_last=True)
 
-    net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
-    net_D = net_D_models[FLAGS.arch]().to(device)
+    net_G = net_G_models[FLAGS.arch](FLAGS.ch, FLAGS.z_dim).to(device)
+    net_D = net_D_models[FLAGS.arch](FLAGS.ch, sn=(lambda x: x)).to(device)
+    net_D = gngan.GradNorm(net_D)
+    net_D_G = biggan.DisGen(net_D, net_G)
+
     if FLAGS.parallel:
-        net_G = torch.nn.DataParallel(net_G)
-        net_D = torch.nn.DataParallel(net_D)
+        net_D_G = torch.nn.DataParallel(net_D_G)
     loss_fn = loss_fns[FLAGS.loss]()
 
-    optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.lr_G, betas=FLAGS.betas)
-    optim_D = optim.Adam(net_D.parameters(), lr=FLAGS.lr_D, betas=FLAGS.betas)
+    optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
+    optim_D = optim.Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
 
     if FLAGS.scheduler:
         sched_G = optim.lr_scheduler.LambdaLR(
@@ -144,6 +138,8 @@ def train():
     os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
     writer = SummaryWriter(os.path.join(FLAGS.logdir))
     sample_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
+    sample_y = torch.randint(
+        FLAGS.n_classes, (FLAGS.sample_size,)).to(device)
     with open(os.path.join(FLAGS.logdir, "flagfile.txt"), 'w') as f:
         f.write(FLAGS.flags_into_string())
     writer.add_text(
@@ -158,50 +154,60 @@ def train():
         for step in pbar:
             # Discriminator
             for _ in range(FLAGS.n_dis):
-                with torch.no_grad():
-                    z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
-                    fake = net_G(z).detach()
-                real, _ = next(looper)
-                real = real.to(device)
-                net_D_real = net_D(real)
-                net_D_fake = net_D(fake)
-                loss, loss_real, loss_fake = loss_fn(net_D_real, net_D_fake)
-
+                loss_list = []
+                loss_real_list = []
+                loss_fake_list = []
                 optim_D.zero_grad()
-                loss.backward()
+                for __ in range(FLAGS.D_accumulation):
+                    real, y_real = next(looper)
+                    real, y_real = real.to(device), y_real.to(device)
+                    z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
+                    y = torch.randint(
+                        FLAGS.n_classes, size=(FLAGS.batch_size,)).to(device)
+                    net_D_real, net_D_fake = net_D_G(z, y, real, y_real)
+                    loss, loss_real, loss_fake = loss_fn(
+                        net_D_real, net_D_fake)
+                    loss_list.append(loss.detach())
+                    loss_real_list.append(loss_real.detach())
+                    loss_fake_list.append(loss_fake.detach())
+                    loss = loss / float(FLAGS.D_accumulation)
+                    loss.backward()
                 optim_D.step()
+                loss = torch.mean(torch.stack(loss_list))
+                loss_real = torch.mean(torch.stack(loss_real_list))
+                loss_fake = torch.mean(torch.stack(loss_fake_list))
 
                 if FLAGS.loss == 'was':
                     loss = -loss
                 pbar.set_postfix(loss='%.4f' % loss)
 
-            with torch.no_grad():
-                slop = torch.abs(net_D_real - net_D_fake) / torch.norm(
-                    torch.flatten(real - fake, start_dim=1),
-                    p=2, dim=1, keepdim=True)
-                slop = slop.mean()
             writer.add_scalar('loss', loss, step)
-            writer.add_scalar('slop', slop, step)
             writer.add_scalar('loss_real', loss_real, step)
             writer.add_scalar('loss_fake', loss_fake, step)
 
             # Generator
-            z = torch.randn(FLAGS.batch_size * 2, FLAGS.z_dim).to(device)
-            x = net_G(z)
-            loss = loss_fn(net_D(x))
-
+            # with module_require_grad(net_D, False):
             optim_G.zero_grad()
-            loss.backward()
+            for _ in range(FLAGS.G_accumulation):
+                batch_size = FLAGS.batch_size * 2
+                z = torch.randn(batch_size, FLAGS.z_dim).to(device)
+                y = torch.randint(
+                    FLAGS.n_classes, size=(batch_size,)).to(device)
+                loss = loss_fn(net_D_G(z, y))
+                loss = loss / float(FLAGS.G_accumulation)
+                loss.backward()
             optim_G.step()
 
+            # scheduler
             if FLAGS.scheduler:
                 sched_G.step()
                 sched_D.step()
 
+            # update progress & log something periodically
             pbar.update(1)
 
             if step == 1 or step % FLAGS.sample_step == 0:
-                fake = net_G(sample_z).cpu()
+                fake = net_G(sample_z, sample_y).cpu()
                 grid = (make_grid(fake) + 1) / 2
                 writer.add_image('sample', grid, step)
                 save_image(grid, os.path.join(
@@ -229,8 +235,8 @@ def train():
                     })
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
                 if FLAGS.record:
-                    imgs = generate_imgs(
-                        net_G, device,
+                    imgs = generate_conditional_imgs(
+                        net_G, device, FLAGS.n_classes,
                         FLAGS.z_dim, FLAGS.num_images, FLAGS.batch_size)
                     is_score, fid_score = get_inception_and_fid_score(
                         imgs, device, FLAGS.fid_cache, verbose=True)
