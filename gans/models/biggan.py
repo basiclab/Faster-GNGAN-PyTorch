@@ -35,11 +35,7 @@ class Attention(nn.Module):
         w = F.softmax(torch.bmm(f.transpose(1, 2), g), -1)
         # attend and project
         o = self.v(torch.bmm(h, w.transpose(1, 2)).view(B, C // 2, H, W))
-        if y is not None:
-            # API compatiable
-            return self.gamma * o + x, y
-        else:
-            return self.gamma * o + x
+        return self.gamma * o + x
 
 
 class ConditionalBatchNorm2d(nn.Module):
@@ -101,7 +97,7 @@ class GenBlock(nn.Module):
         h = self.conv2(h)
         # shorcut
         x = self.shorcut(x)
-        return h + x, y
+        return h + x
 
 
 class Generator32(nn.Module):
@@ -109,11 +105,11 @@ class Generator32(nn.Module):
         super().__init__()
         # channels_multipler = [4, 4, 4, 4]
         self.linear = spectral_norm(nn.Linear(z_dim, (ch * 4) * 4 * 4))
-        self.blocks = nn.Sequential(
+        self.blocks = nn.ModuleList([
             GenBlock(ch * 4, ch * 4, n_classes, False),  # 4ch x 8 x 8
             GenBlock(ch * 4, ch * 4, n_classes, False),  # 4ch x 16 x 16
             GenBlock(ch * 4, ch * 4, n_classes, False),  # 4ch x 32 x 32
-        )
+        ])
         self.output_layer = nn.Sequential(
             nn.BatchNorm2d(ch * 4),
             nn.ReLU(inplace=True),
@@ -124,7 +120,8 @@ class Generator32(nn.Module):
 
     def forward(self, z, y):
         h = self.linear(z).view(z.size(0), -1, 4, 4)
-        h, _ = self.blocks(h, y)
+        for block in self.blocks:
+            h = block(h, y)
         h = self.output_layer(h)
         return h
 
@@ -170,9 +167,9 @@ class Generator128(nn.Module):
         for i, block in enumerate(self.blocks):
             if isinstance(block, nn.ModuleList):
                 for module in block:
-                    h, _ = module(h, ys[i])
+                    h = module(h, ys[i])
             else:
-                h, _ = block(h, ys[i])
+                h = block(h, ys[i])
         h = self.output_layer(h)
 
         return h

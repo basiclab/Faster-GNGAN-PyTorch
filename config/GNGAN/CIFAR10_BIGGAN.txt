@@ -1,4 +1,6 @@
 --arch=biggan32
+--GN
+--ch=64
 --batch_size=64
 --G_accumulation=1
 --D_accumulation=1

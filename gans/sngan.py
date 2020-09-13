@@ -61,7 +61,7 @@ flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
 flags.DEFINE_integer('sample_size', 64, "sampling size of images")
 flags.DEFINE_string('logdir', './logs/SNGAN_CIFAR10_RES', 'log folder')
 flags.DEFINE_bool('record', True, "record inception score and FID score")
-flags.DEFINE_string('fid_cache', './stats/cifar10_stats.npz', 'FID cache')
+flags.DEFINE_string('fid_cache', './stats/cifar10_test.npz', 'FID cache')
 # generate
 flags.DEFINE_bool('generate', False, 'generate images')
 flags.DEFINE_string('pretrain', None, 'path to test model')
@@ -175,13 +175,7 @@ def train():
                     loss = -loss
                 pbar.set_postfix(loss='%.4f' % loss)
 
-            with torch.no_grad():
-                slop = torch.abs(net_D_real - net_D_fake) / torch.norm(
-                    torch.flatten(real - fake, start_dim=1),
-                    p=2, dim=1, keepdim=True)
-                slop = slop.mean()
             writer.add_scalar('loss', loss, step)
-            writer.add_scalar('slop', slop, step)
             writer.add_scalar('loss_real', loss_real, step)
             writer.add_scalar('loss_fake', loss_fake, step)
 

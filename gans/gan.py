@@ -41,20 +41,23 @@ flags.DEFINE_enum('dataset', 'cifar10', ['cifar10', 'stl10'], "dataset")
 flags.DEFINE_enum('arch', 'cnn32', net_G_models.keys(), "architecture")
 flags.DEFINE_integer('total_steps', 100000, "total number of training steps")
 flags.DEFINE_integer('batch_size', 128, "batch size")
+flags.DEFINE_integer('num_workers', 8, "dataloader workers")
 flags.DEFINE_float('G_lr', 2e-4, "Generator learning rate")
 flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 1, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
 flags.DEFINE_enum('loss', 'bce', loss_fns.keys(), "loss function")
+flags.DEFINE_bool('scheduler', True, 'apply linearly LR decay')
+flags.DEFINE_bool('parallel', False, 'multi-gpu training')
 flags.DEFINE_integer('seed', 0, "random seed")
 # logging
 flags.DEFINE_integer('eval_step', 5000, "evaluate FID and Inception Score")
 flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
 flags.DEFINE_integer('sample_size', 64, "sampling size of images")
-flags.DEFINE_string('logdir', './logs/DCGAN_CIFAR10', 'logging folder')
+flags.DEFINE_string('logdir', './logs/GAN_CIFAR10', 'logging folder')
+flags.DEFINE_string('fid_cache', './stats/cifar10_test.npz', 'FID cache')
 flags.DEFINE_bool('record', True, "record inception score and FID score")
-flags.DEFINE_string('fid_cache', './stats/cifar10_stats.npz', 'FID cache')
 # generate
 flags.DEFINE_bool('generate', False, 'generate images')
 flags.DEFINE_string('pretrain', None, 'path to test model')
@@ -106,19 +109,24 @@ def train():
             ]))
 
     dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=FLAGS.batch_size, shuffle=True, num_workers=4,
-        drop_last=True)
+        dataset, batch_size=FLAGS.batch_size, shuffle=True,
+        num_workers=FLAGS.num_workers, drop_last=True)
 
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
-    net_D = net_D_models[FLAGS.arch]().to(device)
+    net_D = models.GradNorm(net_D_models[FLAGS.arch]()).to(device)
+    if FLAGS.parallel:
+        net_G = torch.nn.DataParallel(net_G)
+        net_D = torch.nn.DataParallel(net_D)
     loss_fn = loss_fns[FLAGS.loss]()
 
     optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
     optim_D = optim.Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
-    sched_G = optim.lr_scheduler.LambdaLR(
-        optim_G, lambda step: 1 - step / FLAGS.total_steps)
-    sched_D = optim.lr_scheduler.LambdaLR(
-        optim_D, lambda step: 1 - step / FLAGS.total_steps)
+
+    if FLAGS.scheduler:
+        sched_G = optim.lr_scheduler.LambdaLR(
+            optim_G, lambda step: 1 - step / FLAGS.total_steps)
+        sched_D = optim.lr_scheduler.LambdaLR(
+            optim_D, lambda step: 1 - step / FLAGS.total_steps)
 
     os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
     writer = SummaryWriter(os.path.join(FLAGS.logdir))
@@ -154,32 +162,23 @@ def train():
                     loss = -loss
                 pbar.set_postfix(loss='%.4f' % loss)
 
-            with torch.no_grad():
-                slop = torch.abs(net_D_real - net_D_fake) / torch.norm(
-                    torch.flatten(real - fake, start_dim=1),
-                    p=2, dim=1, keepdim=True)
-                slop = slop.mean()
             writer.add_scalar('loss', loss, step)
-            writer.add_scalar('slop', slop, step)
             writer.add_scalar('loss_real', loss_real, step)
             writer.add_scalar('loss_fake', loss_fake, step)
 
             # Generator
             z = torch.randn(FLAGS.batch_size * 2, FLAGS.z_dim).to(device)
             x = net_G(z)
-            x.retain_grad()
             loss = loss_fn(net_D(x))
 
             optim_G.zero_grad()
             loss.backward()
             optim_G.step()
 
-            avg_grad_norm = torch.norm(torch.flatten(
-                (x.grad * x.shape[0]), start_dim=1), p=2, dim=1).mean()
-            writer.add_scalar('avg_grad_norm', avg_grad_norm, step)
+            if FLAGS.scheduler:
+                sched_G.step()
+                sched_D.step()
 
-            sched_G.step()
-            sched_D.step()
             pbar.update(1)
 
             if step == 1 or step % FLAGS.sample_step == 0:
@@ -191,17 +190,30 @@ def train():
                     FLAGS.logdir, 'sample', '%d.png' % step))
 
             if step == 1 or step % FLAGS.eval_step == 0:
-                torch.save({
-                    'net_G': net_G.state_dict(),
-                    'net_D': net_D.state_dict(),
+                ckpt = {
                     'optim_G': optim_G.state_dict(),
                     'optim_D': optim_D.state_dict(),
-                    'sched_G': sched_G.state_dict(),
-                    'sched_D': sched_D.state_dict(),
-                }, os.path.join(FLAGS.logdir, 'model.pt'))
+                }
+                if FLAGS.parallel:
+                    ckpt.update({
+                        'net_G': net_G.module.state_dict(),
+                        'net_D': net_D.module.state_dict(),
+                    })
+                else:
+                    ckpt.update({
+                        'net_G': net_G.state_dict(),
+                        'net_D': net_D.state_dict(),
+                    })
+                if FLAGS.scheduler:
+                    ckpt.update({
+                        'sched_G': sched_G.state_dict(),
+                        'sched_D': sched_D.state_dict(),
+                    })
+                torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
                 if FLAGS.record:
                     imgs = generate_imgs(
-                        net_G, device, FLAGS.z_dim, 50000, FLAGS.batch_size)
+                        net_G, device,
+                        FLAGS.z_dim, FLAGS.num_images, FLAGS.batch_size)
                     is_score, fid_score = get_inception_and_fid_score(
                         imgs, device, FLAGS.fid_cache, verbose=True)
                     pbar.write(
@@ -212,6 +224,7 @@ def train():
                     writer.add_scalar('inception_score', is_score[0], step)
                     writer.add_scalar('inception_score_std', is_score[1], step)
                     writer.add_scalar('fid_score', fid_score, step)
+                    writer.flush()
     writer.close()
 
 
