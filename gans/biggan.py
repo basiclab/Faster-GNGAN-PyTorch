@@ -304,13 +304,13 @@ def train():
                         imgs = generate_conditional_imgs(
                             net_G_ema, device, FLAGS.n_classes,
                             FLAGS.z_dim, FLAGS.num_images, FLAGS.batch_size)
+                        is_score, fid_score = get_inception_and_fid_score(
+                            imgs, device, FLAGS.fid_cache, verbose=True)
                         pbar.write(
                             "%s/%s Inception Score: %.3f(%.5f), "
                             "FID Score: %6.3f (ema)" % (
                                 step, FLAGS.total_steps, is_score[0],
                                 is_score[1], fid_score))
-                        is_score, fid_score = get_inception_and_fid_score(
-                            imgs, device, FLAGS.fid_cache, verbose=True)
                         writer.add_scalar(
                             'inception_score/eam', is_score[0], step)
                         writer.add_scalar(
