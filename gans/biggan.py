@@ -55,6 +55,10 @@ flags.DEFINE_bool('GN', False, "enable gradient penalty")
 flags.DEFINE_bool('scheduler', True, 'apply linear learing rate decay')
 flags.DEFINE_bool('parallel', False, 'multi-gpu training')
 flags.DEFINE_integer('seed', 0, "random seed")
+# ema
+flags.DEFINE_bool('ema', False, 'exponential moving average params')
+flags.DEFINE_float('ema_decay', 0.999, "ema decay rate")
+flags.DEFINE_integer('ema_start', 1000, "start step for ema")
 # logging
 flags.DEFINE_integer('eval_step', 5000, "evaluate FID and Inception Score")
 flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
@@ -135,6 +139,13 @@ def train():
     if FLAGS.parallel:
         net_D_G = torch.nn.DataParallel(net_D_G)
     loss_fn = loss_fns[FLAGS.loss]()
+
+    # ema
+    if FLAGS.ema:
+        net_G_ema = net_G_models[FLAGS.arch](
+            FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
+        for p_ema, p in zip(net_G_ema.parameters(), net_G.parameters()):
+            p_ema.data.copy_(p.data)
 
     # optimizer
     optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
@@ -226,6 +237,18 @@ def train():
             # update progress & log something periodically
             pbar.update(1)
 
+            if FLAGS.ema:
+                if step >= FLAGS.ema_start:
+                    decay_rate = FLAGS.ema_decay
+                else:
+                    decay_rate = 0
+                net_G_ema = net_G_models[FLAGS.arch](
+                    FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
+                for p_ema, p in zip(
+                        net_G_ema.parameters(), net_G.parameters()):
+                    p_ema.data.copy_(
+                        p_ema.data * decay_rate + p.data * (1 - decay_rate))
+
             if step == 1 or step % FLAGS.sample_step == 0:
                 fake_imgs = []
                 with torch.no_grad():
@@ -252,6 +275,10 @@ def train():
                         'net_G': net_G.state_dict(),
                         'net_D': net_D.state_dict(),
                     })
+                if FLAGS.ema:
+                    ckpt.update({
+                        'net_G_ema': net_G_ema.state_dict(),
+                    })
                 if FLAGS.scheduler:
                     ckpt.update({
                         'sched_G': sched_G.state_dict(),
@@ -273,6 +300,24 @@ def train():
                     writer.add_scalar('inception_score_std', is_score[1], step)
                     writer.add_scalar('fid_score', fid_score, step)
                     writer.flush()
+                    if FLAGS.ema:
+                        imgs = generate_conditional_imgs(
+                            net_G_ema, device, FLAGS.n_classes,
+                            FLAGS.z_dim, FLAGS.num_images, FLAGS.batch_size)
+                        pbar.write(
+                            "%s/%s Inception Score: %.3f(%.5f), "
+                            "FID Score: %6.3f (ema)" % (
+                                step, FLAGS.total_steps, is_score[0],
+                                is_score[1], fid_score))
+                        is_score, fid_score = get_inception_and_fid_score(
+                            imgs, device, FLAGS.fid_cache, verbose=True)
+                        writer.add_scalar(
+                            'inception_score/eam', is_score[0], step)
+                        writer.add_scalar(
+                            'inception_score_std/eam', is_score[1], step)
+                        writer.add_scalar(
+                            'fid_score/eam', fid_score, step)
+                        writer.flush()
     writer.close()
 
 
