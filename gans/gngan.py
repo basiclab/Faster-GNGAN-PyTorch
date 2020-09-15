@@ -159,13 +159,16 @@ def train():
     grid = (make_grid(real) + 1) / 2
     writer.add_image('real_sample', grid)
 
+    z = torch.randn(FLAGS.batch_size, FLAGS.z_dim, requires_grad=False)
+    z = z.to(device)
+
     looper = infiniteloop(dataloader)
     with trange(1, FLAGS.total_steps + 1, dynamic_ncols=True) as pbar:
         for step in pbar:
             # Discriminator
             for _ in range(FLAGS.n_dis):
                 with torch.no_grad():
-                    z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
+                    z.normal_()
                     fake = net_G(z).detach()
                 real, _ = next(looper)
                 real = real.to(device)
@@ -186,7 +189,7 @@ def train():
             writer.add_scalar('loss_fake', loss_fake, step)
 
             # Generator
-            z = torch.randn(FLAGS.batch_size * 2, FLAGS.z_dim).to(device)
+            z.normal_()
             x = net_G(z)
             loss = loss_fn(net_D(x))
 

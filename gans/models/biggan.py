@@ -303,7 +303,7 @@ class DisGen(nn.Module):
 def weights_init(m):
     for module in m.modules():
         if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
-            # torch.nn.init.normal_(module.weight, 0, 0.02)
-            torch.nn.init.kaiming_normal_(module.weight.data)
-            if hasattr(module, 'bias') and module.bias is not None:
-                torch.nn.init.zeros_(module.bias.data)
+            torch.nn.init.normal_(module.weight, 0, 0.02)
+            # torch.nn.init.kaiming_normal_(module.weight.data)
+            # if hasattr(module, 'bias') and module.bias is not None:
+            #     torch.nn.init.zeros_(module.bias.data)
