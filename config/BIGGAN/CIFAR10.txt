@@ -8,10 +8,10 @@
 --fid_cache=./stats/cifar10_test.npz
 --logdir=./logs/BIGGAN_CIFAR10
 --loss=hinge
---D_lr=0.0001
---G_lr=0.0001
+--D_lr=0.0002
+--G_lr=0.0002
 --n_classes=10
---n_dis=5
+--n_dis=4
 --noscheduler
 --num_images=10000
 --record

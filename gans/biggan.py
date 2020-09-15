@@ -101,11 +101,12 @@ def generate():
 def ema(source_net, target_net, decay_rate=0.9999):
     source_dict = source_net.state_dict()
     target_dict = target_net.state_dict()
-    for key in target_dict.keys():
-        source_param, target_param = source_dict[key], target_dict[key]
-        target_param.data.copy_(
-            target_param.data * decay_rate +
-            source_param.data * (1 - decay_rate))
+    with torch.no_grad():
+        for key in target_dict.keys():
+            source_param, target_param = source_dict[key], target_dict[key]
+            target_param.data.copy_(
+                target_param.data * decay_rate +
+                source_param.data * (1 - decay_rate))
 
 
 def evaluate(net_G, writer, pbar, step, suffix=""):
@@ -129,7 +130,7 @@ def train():
         dataset = datasets.CIFAR10(
             './data', train=True, download=True,
             transform=transforms.Compose([
-                transforms.RandomHorizontalFlip(),
+                # transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
             ]))
@@ -138,7 +139,7 @@ def train():
             './data/ILSVRC2012/train',
             transform=transforms.Compose([
                 transforms.Resize((128, 128)),
-                transforms.RandomHorizontalFlip(),
+                # transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
             ]))
@@ -204,6 +205,11 @@ def train():
     writer.add_image('real_sample', grid)
     writer.flush()
 
+    z = torch.randn(FLAGS.batch_size, FLAGS.z_dim, requires_grad=False)
+    z = z.to(device)
+    y = torch.randint(FLAGS.n_classes, size=(FLAGS.batch_size,))
+    y = y.to(device)
+
     looper = infiniteloop(dataloader)
     with trange(1, FLAGS.total_steps + 1, dynamic_ncols=True) as pbar:
         for step in pbar:
@@ -216,9 +222,8 @@ def train():
                 for __ in range(FLAGS.D_accumulation):
                     real, y_real = next(looper)
                     real, y_real = real.to(device), y_real.to(device)
-                    z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
-                    y = torch.randint(
-                        FLAGS.n_classes, size=(FLAGS.batch_size,)).to(device)
+                    z.normal_()
+                    y.random_(0, FLAGS.n_classes)
                     net_D_real, net_D_fake = net_D_G(z, y, real, y_real)
                     loss, loss_real, loss_fake = loss_fn(
                         net_D_real, net_D_fake)
@@ -244,9 +249,8 @@ def train():
             with module_require_grad(net_D, False):
                 optim_G.zero_grad()
                 for _ in range(FLAGS.G_accumulation):
-                    z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
-                    y = torch.randint(
-                        FLAGS.n_classes, size=(FLAGS.batch_size,)).to(device)
+                    z.normal_()
+                    y.random_(0, FLAGS.n_classes)
                     loss = loss_fn(net_D_G(z, y))
                     loss = loss / float(FLAGS.G_accumulation)
                     loss.backward()

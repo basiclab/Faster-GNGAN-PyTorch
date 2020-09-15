@@ -168,6 +168,9 @@ def train():
     writer.add_text(
         "flagfile", FLAGS.flags_into_string().replace('\n', '  \n'))
 
+    z = torch.randn(FLAGS.batch_size, FLAGS.z_dim, requires_grad=False)
+    z = z.to(device)
+
     real = []
     for x, _ in dataloader:
         real.append(x)
@@ -188,7 +191,7 @@ def train():
             # Discriminator
             for _ in range(FLAGS.n_dis):
                 with torch.no_grad():
-                    z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
+                    z.normal_()
                     fake = net_G(z).detach()
                 real, _ = next(looper)
                 real = real.to(device)
@@ -217,7 +220,7 @@ def train():
             writer.add_scalar('loss_fake', loss_fake, step)
 
             # Generator
-            z = torch.randn(FLAGS.batch_size * 2, FLAGS.z_dim).to(device)
+            z.normal_()
             x = net_G(z)
             loss = loss_fn(net_D(x))
 
