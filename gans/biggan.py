@@ -99,8 +99,10 @@ def generate():
 
 
 def ema(source_net, target_net, decay_rate=0.9999):
-    for source_param, target_param in zip(
-            source_net.parameters(), target_net.parameters()):
+    source_dict = source_net.state_dict()
+    target_dict = target_net.state_dict()
+    for key in target_dict.keys():
+        source_param, target_param = source_dict[key], target_dict[key]
         target_param.data.copy_(
             target_param.data * decay_rate +
             source_param.data * (1 - decay_rate))
@@ -114,9 +116,11 @@ def evaluate(net_G, writer, pbar, step, suffix=""):
         imgs, device, FLAGS.fid_cache, verbose=True)
     pbar.write("%s/%s Inception Score: %.3f(%.5f), FID Score: %6.3f %s" % (
         step, FLAGS.total_steps, is_score[0], is_score[1], fid_score, suffix))
-    writer.add_scalar('inception_score', is_score[0], step)
-    writer.add_scalar('inception_score_std', is_score[1], step)
-    writer.add_scalar('fid_score', fid_score, step)
+    if len(suffix) > 0:
+        suffix = "/" + suffix
+    writer.add_scalar('inception_score' + suffix, is_score[0], step)
+    writer.add_scalar('inception_score_std' + suffix, is_score[1], step)
+    writer.add_scalar('fid_score' + suffix, fid_score, step)
     writer.flush()
 
 
@@ -154,15 +158,6 @@ def train():
     else:
         net_D = net_D_models[FLAGS.arch](
             FLAGS.ch, FLAGS.n_classes).to(device)
-    # params_G = 0
-    # for param in net_G.parameters():
-    #     params_G += param.data.nelement()
-    # params_D = 0
-    # for param in net_D.parameters():
-    #     params_D += param.data.nelement()
-    # print(net_G, net_D)
-    # print(params_G, params_D)
-    # exit(0)
     net_D_G = biggan.DisGen(net_D, net_G)
 
     if FLAGS.parallel:
@@ -308,39 +303,11 @@ def train():
                         'sched_D': sched_D.state_dict(),
                     })
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
+
                 if FLAGS.record:
-                    imgs = generate_conditional_imgs(
-                        net_G, device, FLAGS.n_classes,
-                        FLAGS.z_dim, FLAGS.num_images, FLAGS.batch_size)
-                    is_score, fid_score = get_inception_and_fid_score(
-                        imgs, device, FLAGS.fid_cache, verbose=True)
-                    pbar.write(
-                        "%s/%s Inception Score: %.3f(%.5f), "
-                        "FID Score: %6.3f" % (
-                            step, FLAGS.total_steps, is_score[0], is_score[1],
-                            fid_score))
-                    writer.add_scalar('inception_score', is_score[0], step)
-                    writer.add_scalar('inception_score_std', is_score[1], step)
-                    writer.add_scalar('fid_score', fid_score, step)
-                    writer.flush()
+                    evaluate(net_G, writer, pbar, step, suffix="")
                     if FLAGS.ema:
-                        imgs = generate_conditional_imgs(
-                            net_G_ema, device, FLAGS.n_classes,
-                            FLAGS.z_dim, FLAGS.num_images, FLAGS.batch_size)
-                        is_score, fid_score = get_inception_and_fid_score(
-                            imgs, device, FLAGS.fid_cache, verbose=True)
-                        pbar.write(
-                            "%s/%s Inception Score: %.3f(%.5f), "
-                            "FID Score: %6.3f (ema)" % (
-                                step, FLAGS.total_steps, is_score[0],
-                                is_score[1], fid_score))
-                        writer.add_scalar(
-                            'inception_score/eam', is_score[0], step)
-                        writer.add_scalar(
-                            'inception_score_std/eam', is_score[1], step)
-                        writer.add_scalar(
-                            'fid_score/eam', fid_score, step)
-                        writer.flush()
+                        evaluate(net_G_ema, writer, pbar, step, suffix="ema")
     writer.close()
 
 
