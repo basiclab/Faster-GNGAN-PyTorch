@@ -66,8 +66,6 @@ flags.DEFINE_integer('sample_size', 64, "sampling size of images")
 flags.DEFINE_string('logdir', './logs/GNGAN_CIFAR10_BIGGAN', 'log folder')
 flags.DEFINE_string('fid_cache', './stats/cifar10_test.npz', 'FID cache')
 flags.DEFINE_bool('record', True, "record inception score and FID score")
-# flags.DEFINE_integer('max_ckpts', 3, 'the number of recent checkpoints kept')
-
 # generate sample
 flags.DEFINE_bool('generate', False, 'generate images')
 flags.DEFINE_string('pretrain', None, 'path to test model')
@@ -98,6 +96,28 @@ def generate():
                 save_image(
                     image, os.path.join(FLAGS.output, '%d.png' % counter))
                 counter += 1
+
+
+def ema(source_net, target_net, decay_rate=0.9999):
+    for source_param, target_param in zip(
+            source_net.parameters(), target_net.parameters()):
+        target_param.data.copy_(
+            target_param.data * decay_rate +
+            source_param.data * (1 - decay_rate))
+
+
+def evaluate(net_G, writer, pbar, step, suffix=""):
+    imgs = generate_conditional_imgs(
+        net_G, device, FLAGS.n_classes, FLAGS.z_dim, FLAGS.num_images,
+        FLAGS.batch_size)
+    is_score, fid_score = get_inception_and_fid_score(
+        imgs, device, FLAGS.fid_cache, verbose=True)
+    pbar.write("%s/%s Inception Score: %.3f(%.5f), FID Score: %6.3f %s" % (
+        step, FLAGS.total_steps, is_score[0], is_score[1], fid_score, suffix))
+    writer.add_scalar('inception_score', is_score[0], step)
+    writer.add_scalar('inception_score_std', is_score[1], step)
+    writer.add_scalar('fid_score', fid_score, step)
+    writer.flush()
 
 
 def train():
@@ -134,6 +154,15 @@ def train():
     else:
         net_D = net_D_models[FLAGS.arch](
             FLAGS.ch, FLAGS.n_classes).to(device)
+    # params_G = 0
+    # for param in net_G.parameters():
+    #     params_G += param.data.nelement()
+    # params_D = 0
+    # for param in net_D.parameters():
+    #     params_D += param.data.nelement()
+    # print(net_G, net_D)
+    # print(params_G, params_D)
+    # exit(0)
     net_D_G = biggan.DisGen(net_D, net_G)
 
     if FLAGS.parallel:
@@ -144,8 +173,7 @@ def train():
     if FLAGS.ema:
         net_G_ema = net_G_models[FLAGS.arch](
             FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
-        for p_ema, p in zip(net_G_ema.parameters(), net_G.parameters()):
-            p_ema.data.copy_(p.data)
+        ema(source_net=net_G, target_net=net_G_ema, decay_rate=0)
 
     # optimizer
     optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
@@ -238,16 +266,11 @@ def train():
             pbar.update(1)
 
             if FLAGS.ema:
-                if step >= FLAGS.ema_start:
-                    decay_rate = FLAGS.ema_decay
-                else:
+                if step < FLAGS.ema_start:
                     decay_rate = 0
-                net_G_ema = net_G_models[FLAGS.arch](
-                    FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
-                for p_ema, p in zip(
-                        net_G_ema.parameters(), net_G.parameters()):
-                    p_ema.data.copy_(
-                        p_ema.data * decay_rate + p.data * (1 - decay_rate))
+                else:
+                    decay_rate = FLAGS.ema_decay
+                ema(net_G, net_G_ema, decay_rate)
 
             if step == 1 or step % FLAGS.sample_step == 0:
                 fake_imgs = []

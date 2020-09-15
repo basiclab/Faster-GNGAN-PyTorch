@@ -22,6 +22,6 @@
 --betas=0.0
 --betas=0.999
 --ema
---ema_decay=0.999
+--ema_decay=0.9999
 --ema_start=1000
 --seed=0
