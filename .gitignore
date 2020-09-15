@@ -9,8 +9,12 @@ __pycache__
 # log
 logs
 logs_backup
+pretrain
 *.zip
 
 # data
 data
 stats
+
+# pdf
+*.pdf

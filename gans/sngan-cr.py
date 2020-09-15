@@ -133,10 +133,11 @@ def train():
     ])
 
     def consistency_transform_func(images):
-        images = deepcopy(images)
+        device = images.device
+        images = deepcopy(images.cpu())
         for idx, img in enumerate(images):
             images[idx] = consistency_transforms(img)
-        return images
+        return images.to(device)
 
     dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=FLAGS.batch_size, shuffle=True,
