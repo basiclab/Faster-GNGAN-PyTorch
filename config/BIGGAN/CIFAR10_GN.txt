@@ -1,7 +1,7 @@
 --arch=biggan32
 --GN
 --ch=64
---batch_size=64
+--batch_size=50
 --G_accumulation=1
 --D_accumulation=1
 --dataset=cifar10
@@ -23,6 +23,6 @@
 --betas=0.0
 --betas=0.9
 --ema
---ema_decay=0.999
+--ema_decay=0.9999
 --ema_start=1000
 --seed=0

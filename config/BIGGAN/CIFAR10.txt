@@ -8,12 +8,12 @@
 --fid_cache=./stats/cifar10_test.npz
 --logdir=./logs/BIGGAN_CIFAR10
 --loss=hinge
---D_lr=0.0001
---G_lr=0.0001
+--D_lr=0.0002
+--G_lr=0.0002
 --n_classes=10
---n_dis=5
+--n_dis=4
 --noscheduler
---num_images=10000
+--num_images=50000
 --record
 --sample_step=500
 --sample_size=64
@@ -22,6 +22,6 @@
 --betas=0.0
 --betas=0.999
 --ema
---ema_decay=0.999
+--ema_decay=0.9999
 --ema_start=1000
 --seed=0
