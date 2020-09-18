@@ -101,7 +101,7 @@ class GenBlock(nn.Module):
 
 
 class Generator32(nn.Module):
-    def __init__(self, ch=64, n_classes=10, z_dim=128, shared_dim=128):
+    def __init__(self, ch=64, n_classes=10, z_dim=128):
         super().__init__()
         # channels_multipler = [4, 4, 4, 4]
         self.linear = spectral_norm(nn.Linear(z_dim, (ch * 4) * 4 * 4))
@@ -116,6 +116,8 @@ class Generator32(nn.Module):
             spectral_norm(
                 nn.Conv2d(ch * 4, 3, 3, padding=1)),     # 3 x 32 x 32
             nn.Tanh())
+        self.shared = nn.Identity()
+        # if not kwargs['skip_init']:
         weights_init(self)
 
     def forward(self, z, y):
@@ -221,6 +223,7 @@ class DisBlock(nn.Module):
 class Discriminator32(nn.Module):
     def __init__(self, ch=64, n_classes=10, sn=spectral_norm):
         super().__init__()
+        self.fp16 = False
         # channels_multipler = [2, 2, 2, 2]
         self.blocks = nn.Sequential(
             OptimizedDisblock(3, ch * 4, sn=sn),           # 3 x 32 x 32
@@ -232,6 +235,7 @@ class Discriminator32(nn.Module):
 
         self.linear = sn(nn.Linear(ch * 4, 1))
         self.embedding = sn(nn.Embedding(n_classes, ch * 4))
+        # if not kwargs['skip_init']:
         weights_init(self)
 
     def forward(self, x, y_embedding):
@@ -265,21 +269,21 @@ class Discriminator128(nn.Module):
         return h
 
 
-class DisGen(nn.Module):
+class GenDis(nn.Module):
     """
     As suggest in official PyTorch implementation, paralleling generator and
     discriminator together can avoid gathering fake images in the
     intermediate stage
     """
-    def __init__(self, net_D, net_G):
+    def __init__(self, net_G, net_D):
         super().__init__()
-        self.net_D = net_D
         self.net_G = net_G
+        self.net_D = net_D
 
-    def forward(self, z, y_fake, x_real=None, y_real=None):
+    def forward(self, z, y_fake, x_real=None, y_real=None, **kwargs):
         if x_real is not None and y_real is not None:
             with torch.no_grad():
-                x_fake = self.net_G(z, y_fake).detach()
+                x_fake = self.net_G(z, self.net_G.shared(y_fake)).detach()
             x = torch.cat([x_real, x_fake], dim=0)
             y = torch.cat([y_real, y_fake], dim=0)
             if isinstance(self.net_D, GradNorm):
@@ -291,7 +295,7 @@ class DisGen(nn.Module):
                 pred, [x_real.shape[0], x_fake.shape[0]])
             return net_D_real, net_D_fake
         else:
-            x_fake = self.net_G(z, y_fake)
+            x_fake = self.net_G(z, self.net_G.shared(y_fake))
             if isinstance(self.net_D, GradNorm):
                 y_fake = self.net_D.module.embedding(y_fake)
             else:
