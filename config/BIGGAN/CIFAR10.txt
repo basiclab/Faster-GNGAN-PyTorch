@@ -6,7 +6,7 @@
 --dataset=cifar10
 --eval_step=5000
 --fid_cache=./stats/cifar10_test.npz
---logdir=./logs/BIGGAN_CIFAR10
+--logdir=./logs/BIGGAN/CIFAR10/0
 --loss=hinge
 --D_lr=0.0002
 --G_lr=0.0002
@@ -17,7 +17,7 @@
 --record
 --sample_step=500
 --sample_size=64
---total_steps=100000
+--total_steps=125000
 --z_dim=128
 --betas=0.0
 --betas=0.999

@@ -2,7 +2,7 @@
 --batch_size=64
 --dataset=cifar10
 --fid_cache=./stats/cifar10_test.npz
---logdir=./logs/GAN_CIFAR10_RES
+--logdir=./logs/GAN/CIFAR10/RES/0
 --loss=bce
 --D_lr=0.0001
 --G_lr=0.0001

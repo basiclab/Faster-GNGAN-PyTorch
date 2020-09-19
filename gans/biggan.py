@@ -10,7 +10,6 @@ from tqdm import trange
 
 from models import biggan, gngan
 from common import losses
-# from common import inception_utils
 from common.utils import generate_conditional_imgs, set_seed, infiniteloop
 from common.score.score import get_inception_and_fid_score
 
@@ -48,10 +47,10 @@ flags.DEFINE_integer('D_accumulation', 1, 'gradient accumulation for D')
 flags.DEFINE_integer('n_dis', 4, "update Generator every this steps")
 flags.DEFINE_float('G_lr', 2e-4, "Generator learning rate")
 flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
-flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
+flags.DEFINE_multi_float('betas', [0.0, 0.999], "for Adam")
 flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
 flags.DEFINE_bool('GN', False, "enable gradient penalty")
-flags.DEFINE_bool('scheduler', True, 'apply linear learing rate decay')
+flags.DEFINE_bool('scheduler', False, 'apply linear learing rate decay')
 flags.DEFINE_bool('parallel', False, 'multi-gpu training')
 flags.DEFINE_integer('seed', 0, "random seed")
 # ema
@@ -205,8 +204,6 @@ def train():
     writer.add_image('real_sample', grid)
     writer.flush()
 
-    # get_inception_metrics = inception_utils.prepare_inception_metrics()
-
     z_rand = torch.zeros(
         FLAGS.batch_size, FLAGS.z_dim, dtype=torch.float).to(device)
     y_rand = torch.zeros(
@@ -288,7 +285,7 @@ def train():
                 save_image(grid, os.path.join(
                     FLAGS.logdir, 'sample', '%d.png' % step))
 
-            if step % FLAGS.eval_step == 0:
+            if step == 1 or step % FLAGS.eval_step == 0:
                 ckpt = {
                     'optim_G': optim_G.state_dict(),
                     'optim_D': optim_D.state_dict(),
@@ -315,12 +312,6 @@ def train():
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
 
                 if FLAGS.record:
-                    # IS_mean, IS_std, FID = get_inception_metrics(
-                    #     net_G_ema, z, y, FLAGS.num_images)
-                    # pbar.write("%s/%s Inception Score: %.3f(%.5f), "
-                    #            "FID Score: %6.3f (unofficial)" % (
-                    #                 step, FLAGS.total_steps,
-                    #                 IS_mean, IS_std, FID))
                     if FLAGS.ema:
                         evaluate(net_G_ema, writer, pbar, step, suffix="ema")
                     else:
