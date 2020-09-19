@@ -3,7 +3,7 @@
 --dataset=imagenet
 --eval_step=1000
 --fid_cache=./stats/imagenet_train.npz
---logdir=./logs/GNGAN_IMAGENET_RES
+--logdir=./logs/GNGAN/IMAGENET/RES/0
 --loss=hinge
 --D_lr=0.0002
 --G_lr=0.0002
