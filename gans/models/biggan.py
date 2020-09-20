@@ -238,9 +238,9 @@ class Discriminator32(nn.Module):
         # if not kwargs['skip_init']:
         weights_init(self)
 
-    def forward(self, x, y_embedding):
+    def forward(self, x, y):
         h = self.blocks(x).sum(dim=[2, 3])
-        h = self.linear(h) + (y_embedding * h).sum(dim=1, keepdim=True)
+        h = self.linear(h) + (self.embedding(y) * h).sum(dim=1, keepdim=True)
         return h
 
 
@@ -263,9 +263,9 @@ class Discriminator128(nn.Module):
         self.embedding = sn(nn.Embedding(n_classes, ch * 16))
         weights_init(self)
 
-    def forward(self, x, y_embedding):
+    def forward(self, x, y):
         h = self.blocks(x).sum(dim=[2, 3])
-        h = self.linear(h) + (y_embedding * h).sum(dim=1, keepdim=True)
+        h = self.linear(h) + (self.embedding(y) * h).sum(dim=1, keepdim=True)
         return h
 
 
@@ -286,21 +286,13 @@ class GenDis(nn.Module):
                 x_fake = self.net_G(z, self.net_G.shared(y_fake)).detach()
             x = torch.cat([x_real, x_fake], dim=0)
             y = torch.cat([y_real, y_fake], dim=0)
-            if isinstance(self.net_D, GradNorm):
-                y = self.net_D.module.embedding(y)
-            else:
-                y = self.net_D.embedding(y)
-            pred = self.net_D(x, y)
+            pred = self.net_D(x, y=y)
             net_D_real, net_D_fake = torch.split(
                 pred, [x_real.shape[0], x_fake.shape[0]])
             return net_D_real, net_D_fake
         else:
             x_fake = self.net_G(z, self.net_G.shared(y_fake))
-            if isinstance(self.net_D, GradNorm):
-                y_fake = self.net_D.module.embedding(y_fake)
-            else:
-                y_fake = self.net_D.embedding(y_fake)
-            net_D_fake = self.net_D(x_fake, y_fake)
+            net_D_fake = self.net_D(x_fake, y=y_fake)
             return net_D_fake
 
 
