@@ -168,7 +168,7 @@ def train():
     writer.add_text(
         "flagfile", FLAGS.flags_into_string().replace('\n', '  \n'))
 
-    z = torch.randn(FLAGS.batch_size, FLAGS.z_dim, requires_grad=False)
+    z = torch.randn(2 * FLAGS.batch_size, FLAGS.z_dim, requires_grad=False)
     z = z.to(device)
 
     real = []
@@ -192,7 +192,7 @@ def train():
             for _ in range(FLAGS.n_dis):
                 with torch.no_grad():
                     z.normal_()
-                    fake = net_G(z).detach()
+                    fake = net_G(z[: FLAGS.batch_size]).detach()
                 real, _ = next(looper)
                 real = real.to(device)
                 augment_real = consistency_transform_func(real)
