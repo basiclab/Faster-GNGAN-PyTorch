@@ -277,9 +277,9 @@ def train():
             if step == 1 or step % FLAGS.sample_step == 0:
                 fake_imgs = []
                 with torch.no_grad():
-                    for z, y in zip(fixed_z, fixed_y):
-                        fake = (net_G(z, y).cpu() + 1) / 2
-                        fake_imgs.append(fake)
+                    for fixed_z_batch, fixed_y_batch in zip(fixed_z, fixed_y):
+                        fake = net_G(fixed_z_batch, fixed_y_batch).cpu()
+                        fake_imgs.append((fake + 1) / 2)
                     grid = make_grid(torch.cat(fake_imgs, dim=0))
                 writer.add_image('sample', grid, step)
                 save_image(grid, os.path.join(
