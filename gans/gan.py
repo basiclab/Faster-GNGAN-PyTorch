@@ -130,8 +130,8 @@ def train():
 
     os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
     writer = SummaryWriter(FLAGS.logdir)
-    sample_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
-    sample_z = torch.split(sample_z, FLAGS.batch_size, dim=0)
+    fixed_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
+    fixed_z = torch.split(fixed_z, FLAGS.batch_size, dim=0)
     with open(os.path.join(FLAGS.logdir, "flagfile.txt"), 'w') as f:
         f.write(FLAGS.flags_into_string())
     writer.add_text(
@@ -193,8 +193,8 @@ def train():
             if step == 1 or step % FLAGS.sample_step == 0:
                 fake_imgs = []
                 with torch.no_grad():
-                    for z in sample_z:
-                        fake = (net_G(z).cpu() + 1) / 2
+                    for fixed_z_batch in fixed_z:
+                        fake = (net_G(fixed_z_batch).cpu() + 1) / 2
                         fake_imgs.append(fake)
                     grid = make_grid(torch.cat(fake_imgs, dim=0))
                 writer.add_image('sample', grid, step)
