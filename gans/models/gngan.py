@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 
 
-def grad_norm(net_D, *args):
+def grad_norm(net_D, *args, **kwargs):
     for x in args:
         x.requires_grad_(True)
-    fx = net_D(*args)
+    fx = net_D(*args, **kwargs)
     grads = torch.autograd.grad(
         fx, args, torch.ones_like(fx), create_graph=True,
         retain_graph=True)
@@ -25,8 +25,8 @@ class GradNorm(nn.Module):
         super(GradNorm, self).__init__()
         self.module = module
 
-    def forward(self, *args):
-        return grad_norm(self.module, *args)
+    def forward(self, *args, **kwargs):
+        return grad_norm(self.module, *args, **kwargs)
 
 
 class Generator(nn.Module):
