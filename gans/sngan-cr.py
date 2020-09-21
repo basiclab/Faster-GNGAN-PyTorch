@@ -160,7 +160,7 @@ def train():
             optim_D, lambda step: 1 - step / FLAGS.total_steps)
 
     os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
-    writer = SummaryWriter(os.path.join(FLAGS.logdir))
+    writer = SummaryWriter(FLAGS.logdir)
     sample_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
     sample_z = torch.split(sample_z, FLAGS.batch_size, dim=0)
     with open(os.path.join(FLAGS.logdir, "flagfile.txt"), 'w') as f:
@@ -182,7 +182,7 @@ def train():
     writer.add_image('augment_real_sample', grid)
     writer.flush()
 
-    z = torch.randn(FLAGS.batch_size, FLAGS.z_dim, requires_grad=False)
+    z = torch.randn(2 * FLAGS.batch_size, FLAGS.z_dim, requires_grad=False)
     z = z.to(device)
 
     looper = infiniteloop(dataloader)
@@ -192,7 +192,7 @@ def train():
             for _ in range(FLAGS.n_dis):
                 with torch.no_grad():
                     z.normal_()
-                    fake = net_G(z).detach()
+                    fake = net_G(z[: FLAGS.batch_size]).detach()
                 real, _ = next(looper)
                 real = real.to(device)
                 augment_real = consistency_transform_func(real)

@@ -183,7 +183,7 @@ def train():
 
     # sample fixed z and y
     os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
-    writer = SummaryWriter(os.path.join(FLAGS.logdir))
+    writer = SummaryWriter(FLAGS.logdir)
     fixed_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
     fixed_z = torch.split(fixed_z, FLAGS.batch_size, dim=0)
     fixed_y = torch.randint(FLAGS.n_classes, (FLAGS.sample_size,)).to(device)
