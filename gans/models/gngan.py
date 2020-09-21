@@ -16,7 +16,7 @@ def grad_norm(net_D, *args):
     grad_norm = torch.sqrt(torch.stack(grad_norms, dim=1).sum(dim=1))
     grad_norm = grad_norm.view(
         -1, *[1 for _ in range(len(fx.shape) - 1)])
-    fx = (fx / (grad_norm + torch.abs(fx) + 1e-12))
+    fx = (fx / (grad_norm + torch.abs(fx)))
     return fx
 
 
