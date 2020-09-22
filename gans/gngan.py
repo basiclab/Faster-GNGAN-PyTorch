@@ -214,7 +214,7 @@ def train():
                 save_image(grid, os.path.join(
                     FLAGS.logdir, 'sample', '%d.png' % step))
 
-            if step % FLAGS.eval_step == 0:
+            if step == 1 or step % FLAGS.eval_step == 0:
                 ckpt = {
                     'optim_G': optim_G.state_dict(),
                     'optim_D': optim_D.state_dict(),
