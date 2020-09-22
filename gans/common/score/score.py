@@ -6,8 +6,11 @@ from .inception import InceptionV3
 from .fid_score import calculate_frechet_distance
 
 
-def get_inception_and_fid_score(images, device, fid_cache, is_splits=10,
-                                batch_size=50, verbose=False):
+device = torch.device('cuda:0')
+
+
+def get_inception_and_fid_score(images, fid_cache, is_splits=10, batch_size=50,
+                                verbose=False):
     block_idx1 = InceptionV3.BLOCK_INDEX_BY_DIM[2048]
     block_idx2 = InceptionV3.BLOCK_INDEX_BY_DIM['prob']
     model = InceptionV3([block_idx1, block_idx2]).to(device)
@@ -22,7 +25,7 @@ def get_inception_and_fid_score(images, device, fid_cache, is_splits=10,
     is_probs = np.empty((len(images), 1008))
 
     if verbose:
-        iterator = trange(0, len(images), batch_size)
+        iterator = trange(0, len(images), batch_size, dynamic_ncols=True)
     else:
         iterator = range(0, len(images), batch_size)
 

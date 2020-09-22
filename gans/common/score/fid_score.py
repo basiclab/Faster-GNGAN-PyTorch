@@ -8,9 +8,10 @@ from .inception import InceptionV3
 
 
 DIM = 2048
+device = torch.device('cuda:0')
 
 
-def get_statistics(images, model, device, batch_size=50, verbose=False):
+def get_statistics(images, model, batch_size=50, verbose=False):
     """Calculates the activations of the pool_3 layer for all images.
 
     Params:
@@ -121,12 +122,12 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
             np.trace(sigma2) - 2 * tr_covmean)
 
 
-def get_fid_score(images, stats_cache, device, batch_size=50, verbose=False):
+def get_fid_score(images, stats_cache, batch_size=50, verbose=False):
     block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[DIM]
     model = InceptionV3([block_idx]).to(device)
 
     f = np.load(stats_cache)
-    m1, s1 = get_statistics(images, model, device, batch_size, verbose)
+    m1, s1 = get_statistics(images, model, batch_size, verbose)
     m2, s2 = f['mu'][:], f['sigma'][:]
     f.close()
     fid_value = calculate_frechet_distance(m1, s1, m2, s2)

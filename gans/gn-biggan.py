@@ -10,7 +10,9 @@ from tqdm import trange
 
 from models import biggan, gngan
 from common import losses
-from common.utils import generate_conditional_imgs, set_seed, infiniteloop
+from common.utils import (
+    ema, generate_conditional_imgs, generate_and_save, module_no_grad,
+    infiniteloop, set_seed)
 from common.score.score import get_inception_and_fid_score
 
 
@@ -73,57 +75,31 @@ flags.DEFINE_integer('num_images', 50000, 'the number of generated images')
 device = torch.device('cuda:0')
 
 
-def ema(source, target, decay):
-    source_dict = source.state_dict()
-    target_dict = target.state_dict()
-    for key in source_dict.keys():
-        target_dict[key].data.copy_(
-            target_dict[key].data * decay +
-            source_dict[key].data * (1 - decay)
-        )
-
-
-def set_grad(m: torch.nn.Module, require_grad: bool):
-    for param in m.parameters():
-        param.requires_grad_(require_grad)
-
-
 def generate():
     assert FLAGS.pretrain is not None, "set model weight by --pretrain [model]"
 
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
     net_G.load_state_dict(torch.load(FLAGS.pretrain)['net_G'])
-    net_G.eval()
 
-    counter = 0
-    os.makedirs(FLAGS.output)
-    with torch.no_grad():
-        for start in trange(
-                0, FLAGS.num_images, FLAGS.batch_size, dynamic_ncols=True):
-            batch_size = min(FLAGS.batch_size, FLAGS.num_images - start)
-            z = torch.randn(batch_size, FLAGS.z_dim).to(device)
-            y = torch.randint(FLAGS.n_classes, size=(FLAGS.sample_size,))
-            x = net_G(z, y).cpu()
-            x = (x + 1) / 2
-            for image in x:
-                save_image(
-                    image, os.path.join(FLAGS.output, '%d.png' % counter))
-                counter += 1
-
-
-def evaluate(net_G, writer, pbar, step, suffix=""):
-    imgs = generate_conditional_imgs(
-        net_G, device, FLAGS.n_classes, FLAGS.z_dim, FLAGS.num_images,
+    generate_and_save(
+        net_G,
+        FLAGS.output_dir,
+        FLAGS.z_dim,
+        FLAGS.num_images,
         FLAGS.batch_size)
-    is_score, fid_score = get_inception_and_fid_score(
-        imgs, device, FLAGS.fid_cache, verbose=True)
-    pbar.write("%s/%s Inception Score: %.3f(%.5f), FID Score: %6.3f %s" % (
-        step, FLAGS.total_steps, is_score[0], is_score[1], fid_score, suffix))
-    if len(suffix) > 0:
-        suffix = "/" + suffix
-    writer.add_scalar('inception_score' + suffix, is_score[0], step)
-    writer.add_scalar('inception_score_std' + suffix, is_score[1], step)
-    writer.add_scalar('fid_score' + suffix, fid_score, step)
+
+
+def evaluate(net_G, writer, pbar, step):
+    imgs = generate_conditional_imgs(
+        net_G, FLAGS.n_classes, FLAGS.z_dim, FLAGS.num_images,
+        FLAGS.batch_size)
+    (is_mean, is_std), fid_score = get_inception_and_fid_score(
+        imgs, FLAGS.fid_cache, verbose=True)
+    pbar.write("%s/%s Inception Score: %.3f(%.5f), FID Score: %6.3f" % (
+        step, FLAGS.total_steps, is_mean, is_std, fid_score))
+    writer.add_scalar('inception_score', is_mean, step)
+    writer.add_scalar('inception_score_std', is_std, step)
+    writer.add_scalar('fid_score', fid_score, step)
     writer.flush()
 
 
@@ -180,6 +156,8 @@ def train():
             optim_G, lambda step: 1 - step / FLAGS.total_steps)
         sched_D = optim.lr_scheduler.LambdaLR(
             optim_D, lambda step: 1 - step / FLAGS.total_steps)
+    else:
+        sched_G = sched_D = None
 
     # sample fixed z and y
     os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
@@ -216,8 +194,6 @@ def train():
             loss_real_list = []
             loss_fake_list = []
 
-            set_grad(net_G, False)
-            set_grad(net_D, True)
             net_D.train()
             for _ in range(FLAGS.n_dis):
                 optim_D.zero_grad()
@@ -250,14 +226,13 @@ def train():
             writer.add_scalar('loss_real', loss_real.item(), step)
             writer.add_scalar('loss_fake', loss_fake.item(), step)
 
-            set_grad(net_G, True)
-            set_grad(net_D, False)
             net_G.train()
             optim_G.zero_grad()
             for _ in range(FLAGS.G_accumulation):
                 z_rand.normal_()
                 y_rand.random_(FLAGS.n_classes)
-                loss = loss_fn(net_GD(z_rand, y_rand))
+                with module_no_grad(net_D):
+                    loss = loss_fn(net_GD(z_rand, y_rand))
                 loss = loss / float(FLAGS.G_accumulation)
                 loss.backward()
             optim_G.step()
@@ -287,35 +262,22 @@ def train():
 
             if step == 1 or step % FLAGS.eval_step == 0:
                 ckpt = {
+                    'net_G': (net_G.module.state_dict()
+                              if FLAGS.parallel else net_G.state_dict()),
+                    'net_D': (net_D.module.state_dict()
+                              if FLAGS.parallel else net_D.state_dict()),
                     'optim_G': optim_G.state_dict(),
                     'optim_D': optim_D.state_dict(),
+                    'sched_G': sched_G.state_dict() if sched_G else None,
+                    'sched_D': sched_D.state_dict() if sched_D else None,
+                    'net_G_ema': net_G_ema.state_dict() if FLAGS.ema else None,
                 }
-                if FLAGS.parallel:
-                    ckpt.update({
-                        'net_G': net_G.module.state_dict(),
-                        'net_D': net_D.module.state_dict(),
-                    })
-                else:
-                    ckpt.update({
-                        'net_G': net_G.state_dict(),
-                        'net_D': net_D.state_dict(),
-                    })
-                if FLAGS.ema:
-                    ckpt.update({
-                        'net_G_ema': net_G_ema.state_dict(),
-                    })
-                if FLAGS.scheduler:
-                    ckpt.update({
-                        'sched_G': sched_G.state_dict(),
-                        'sched_D': sched_D.state_dict(),
-                    })
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
-
                 if FLAGS.record:
                     if FLAGS.ema:
-                        evaluate(net_G_ema, writer, pbar, step, suffix="ema")
+                        evaluate(net_G_ema, writer, pbar, step)
                     else:
-                        evaluate(net_G, writer, pbar, step, suffix="")
+                        evaluate(net_G, writer, pbar, step)
     writer.close()
 
 

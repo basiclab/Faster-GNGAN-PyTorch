@@ -10,7 +10,9 @@ from tqdm import trange
 
 import models.sngan as models
 import common.losses as losses
-from common.utils import generate_imgs, infiniteloop, set_seed
+from common.utils import (
+    ema, generate_imgs, generate_and_save, infiniteloop, module_no_grad,
+    set_seed)
 from common.score.score import get_inception_and_fid_score
 
 
@@ -55,13 +57,17 @@ flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
 flags.DEFINE_bool('scheduler', True, 'apply linearly LR decay')
 flags.DEFINE_bool('parallel', False, 'multi-gpu training')
 flags.DEFINE_integer('seed', 0, "random seed")
+# ema
+flags.DEFINE_bool('ema', True, 'exponential moving average params')
+flags.DEFINE_float('ema_decay', 0.9999, "ema decay rate")
+flags.DEFINE_integer('ema_start', 1000, "start step for ema")
 # logging
 flags.DEFINE_integer('eval_step', 5000, "evaluate FID and Inception Score")
 flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
 flags.DEFINE_integer('sample_size', 64, "sampling size of images")
-flags.DEFINE_string('logdir', './logs/SNGAN_CIFAR10_RES', 'log folder')
-flags.DEFINE_bool('record', True, "record inception score and FID score")
+flags.DEFINE_string('logdir', './logs/SNGAN/CIFAR10/RES/0', 'log folder')
 flags.DEFINE_string('fid_cache', './stats/cifar10_test.npz', 'FID cache')
+flags.DEFINE_bool('record', True, "record inception score and FID score")
 # generate
 flags.DEFINE_bool('generate', False, 'generate images')
 flags.DEFINE_string('pretrain', None, 'path to test model')
@@ -76,21 +82,26 @@ def generate():
 
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
     net_G.load_state_dict(torch.load(FLAGS.pretrain)['net_G'])
-    net_G.eval()
 
-    counter = 0
-    os.makedirs(FLAGS.output)
-    with torch.no_grad():
-        for start in trange(
-                0, FLAGS.num_images, FLAGS.batch_size, dynamic_ncols=True):
-            batch_size = min(FLAGS.batch_size, FLAGS.num_images - start)
-            z = torch.randn(batch_size, FLAGS.z_dim).to(device)
-            x = net_G(z).cpu()
-            x = (x + 1) / 2
-            for image in x:
-                save_image(
-                    image, os.path.join(FLAGS.output, '%d.png' % counter))
-                counter += 1
+    generate_and_save(
+        net_G,
+        FLAGS.output_dir,
+        FLAGS.z_dim,
+        FLAGS.num_images,
+        FLAGS.batch_size)
+
+
+def evaluate(net_G, writer, pbar, step):
+    imgs = generate_imgs(
+        net_G, FLAGS.z_dim, FLAGS.num_images, FLAGS.batch_size)
+    (is_mean, is_std), fid_score = get_inception_and_fid_score(
+        imgs, FLAGS.fid_cache, verbose=True)
+    pbar.write("%s/%s Inception Score: %.3f(%.5f), FID Score: %6.3f" % (
+        step, FLAGS.total_steps, is_mean, is_std, fid_score))
+    writer.add_scalar('inception_score', is_mean, step)
+    writer.add_scalar('inception_score_std', is_std, step)
+    writer.add_scalar('fid_score', fid_score, step)
+    writer.flush()
 
 
 def train():
@@ -98,18 +109,18 @@ def train():
         dataset = datasets.CIFAR10(
             './data', train=True, download=True,
             transform=transforms.Compose([
+                transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-                transforms.Lambda(lambda x: x + torch.rand_like(x) / 128)
             ]))
     if FLAGS.dataset == 'stl10':
         dataset = datasets.STL10(
             './data', split='unlabeled', download=True,
             transform=transforms.Compose([
                 transforms.Resize((48, 48)),
+                transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-                transforms.Lambda(lambda x: x + torch.rand_like(x) / 128)
             ]))
     if FLAGS.dataset == 'imagenet':
         dataset = datasets.ImageFolder(
@@ -132,6 +143,11 @@ def train():
         net_D = torch.nn.DataParallel(net_D)
     loss_fn = loss_fns[FLAGS.loss]()
 
+    # ema
+    if FLAGS.ema:
+        net_G_ema = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
+        ema(net_G, net_G_ema, decay=0)
+
     optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
     optim_D = optim.Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
 
@@ -140,6 +156,8 @@ def train():
             optim_G, lambda step: 1 - step / FLAGS.total_steps)
         sched_D = optim.lr_scheduler.LambdaLR(
             optim_D, lambda step: 1 - step / FLAGS.total_steps)
+    else:
+        sched_G = sched_D = None
 
     os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
     writer = SummaryWriter(FLAGS.logdir)
@@ -191,7 +209,8 @@ def train():
             # Generator
             z.normal_()
             x = net_G(z)
-            loss = loss_fn(net_D(x))
+            with module_no_grad(net_D):
+                loss = loss_fn(net_D(x))
 
             optim_G.zero_grad()
             loss.backward()
@@ -201,7 +220,12 @@ def train():
                 sched_G.step()
                 sched_D.step()
 
-            pbar.update(1)
+            if FLAGS.ema:
+                if step < FLAGS.ema_start:
+                    decay = 0
+                else:
+                    decay = FLAGS.ema_decay
+                ema(net_G, net_G_ema, decay)
 
             if step == 1 or step % FLAGS.sample_step == 0:
                 fake_imgs = []
@@ -216,40 +240,22 @@ def train():
 
             if step == 1 or step % FLAGS.eval_step == 0:
                 ckpt = {
+                    'net_G': (net_G.module.state_dict()
+                              if FLAGS.parallel else net_G.state_dict()),
+                    'net_D': (net_D.module.state_dict()
+                              if FLAGS.parallel else net_D.state_dict()),
                     'optim_G': optim_G.state_dict(),
                     'optim_D': optim_D.state_dict(),
+                    'sched_G': sched_G.state_dict() if sched_G else None,
+                    'sched_D': sched_D.state_dict() if sched_D else None,
+                    'net_G_ema': net_G_ema.state_dict() if FLAGS.ema else None,
                 }
-                if FLAGS.parallel:
-                    ckpt.update({
-                        'net_G': net_G.module.state_dict(),
-                        'net_D': net_D.module.state_dict(),
-                    })
-                else:
-                    ckpt.update({
-                        'net_G': net_G.state_dict(),
-                        'net_D': net_D.state_dict(),
-                    })
-                if FLAGS.scheduler:
-                    ckpt.update({
-                        'sched_G': sched_G.state_dict(),
-                        'sched_D': sched_D.state_dict(),
-                    })
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
                 if FLAGS.record:
-                    imgs = generate_imgs(
-                        net_G, device,
-                        FLAGS.z_dim, FLAGS.num_images, FLAGS.batch_size)
-                    is_score, fid_score = get_inception_and_fid_score(
-                        imgs, device, FLAGS.fid_cache, verbose=True)
-                    pbar.write(
-                        "%s/%s Inception Score: %.3f(%.5f), "
-                        "FID Score: %6.3f" % (
-                            step, FLAGS.total_steps, is_score[0], is_score[1],
-                            fid_score))
-                    writer.add_scalar('inception_score', is_score[0], step)
-                    writer.add_scalar('inception_score_std', is_score[1], step)
-                    writer.add_scalar('fid_score', fid_score, step)
-                    writer.flush()
+                    if FLAGS.ema:
+                        evaluate(net_G_ema, writer, pbar, step)
+                    else:
+                        evaluate(net_G, writer, pbar, step)
     writer.close()
 
 
