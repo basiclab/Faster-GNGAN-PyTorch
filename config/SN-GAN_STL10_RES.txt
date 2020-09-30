@@ -1,8 +1,8 @@
---arch=res32
+--arch=res48
 --batch_size=64
---dataset=cifar10
---fid_cache=./stats/cifar10_test.npz
---logdir=./logs/SNGAN/CIFAR10/RES/0
+--dataset=stl10
+--fid_cache=./stats/stl10_unlabeled48.npz
+--logdir=./logs/SN-GAN_STL10_RES_0
 --loss=hinge
 --D_lr=0.0002
 --G_lr=0.0002

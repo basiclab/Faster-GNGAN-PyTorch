@@ -1,9 +1,9 @@
---arch=cnn48
+--arch=cnn32
 --batch_size=64
---dataset=stl10
---fid_cache=./stats/stl10_unlabeled48.npz
---logdir=./logs/GNGAN/STL10/CNN/0
---loss=bce
+--dataset=cifar10
+--fid_cache=./stats/cifar10_test.npz
+--logdir=./logs/SN-GAN_CIFAR10_CNN_0
+--loss=hinge
 --D_lr=0.0002
 --G_lr=0.0002
 --n_dis=1
@@ -12,5 +12,5 @@
 --sample_step=500
 --sample_size=64
 --seed=0
---total_steps=200000
+--total_steps=100000
 --z_dim=128

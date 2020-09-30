@@ -7,7 +7,7 @@
 --dataset=cifar10
 --eval_step=5000
 --fid_cache=./stats/cifar10_test.npz
---logdir=./logs/BIGGAN/CIFAR10/0_GN
+--logdir=./logs/GN-BIGGAN_CIFAR10_0
 --loss=hinge
 --D_lr=0.0002
 --G_lr=0.0002
