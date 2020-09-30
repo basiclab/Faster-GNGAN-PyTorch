@@ -10,11 +10,14 @@ device = torch.device('cuda:0')
 
 
 def get_inception_and_fid_score(images, fid_cache, is_splits=10, batch_size=50,
-                                verbose=False):
+                                verbose=False, parallel=False):
     block_idx1 = InceptionV3.BLOCK_INDEX_BY_DIM[2048]
     block_idx2 = InceptionV3.BLOCK_INDEX_BY_DIM['prob']
     model = InceptionV3([block_idx1, block_idx2]).to(device)
     model.eval()
+
+    if parallel:
+        model = torch.nn.DataParallel(model)
 
     if batch_size > len(images):
         print(('Warning: batch size is bigger than the data size. '

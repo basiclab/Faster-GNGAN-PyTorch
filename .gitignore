@@ -10,6 +10,7 @@ __pycache__
 logs
 logs_backup
 pretrain
+figures
 *.zip
 
 # data

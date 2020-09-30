@@ -291,6 +291,30 @@ class ResDiscriminator128(nn.Module):
         return x
 
 
+class GenDis(nn.Module):
+    """
+    Speed up training by paralleling generator and discriminator together
+    """
+    def __init__(self, net_G, net_D):
+        super().__init__()
+        self.net_G = net_G
+        self.net_D = net_D
+
+    def forward(self, z, real=None):
+        if real is not None:
+            with torch.no_grad():
+                fake = self.net_G(z).detach()
+            x = torch.cat([real, fake], dim=0)
+            pred = self.net_D(x)
+            net_D_real, net_D_fake = torch.split(
+                pred, [real.shape[0], fake.shape[0]])
+            return net_D_real, net_D_fake
+        else:
+            fake = self.net_G(z)
+            net_D_fake = self.net_D(fake)
+            return net_D_fake
+
+
 def weights_init(model):
     for name, module in model.named_modules():
         if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d)):

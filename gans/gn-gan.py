@@ -8,28 +8,28 @@ from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
-import models.gngan as models
-import common.losses as losses
+from models import gngan
+from common import losses
+from common.score.score import get_inception_and_fid_score
 from common.utils import (
     ema, generate_imgs, generate_and_save, infiniteloop, module_no_grad,
     set_seed)
-from common.score.score import get_inception_and_fid_score
 
 
 net_G_models = {
-    'res32': models.ResGenerator32,
-    'res48': models.ResGenerator48,
-    'cnn32': models.Generator32,
-    'cnn48': models.Generator48,
-    'res128': models.ResGenerator128,
+    'res32': gngan.ResGenerator32,
+    'res48': gngan.ResGenerator48,
+    'cnn32': gngan.Generator32,
+    'cnn48': gngan.Generator48,
+    'res128': gngan.ResGenerator128,
 }
 
 net_D_models = {
-    'res32': models.ResDiscriminator32,
-    'res48': models.ResDiscriminator48,
-    'cnn32': models.Discriminator32,
-    'cnn48': models.Discriminator48,
-    'res128': models.ResDiscriminator128,
+    'res32': gngan.ResDiscriminator32,
+    'res48': gngan.ResDiscriminator48,
+    'cnn32': gngan.Discriminator32,
+    'cnn48': gngan.Discriminator48,
+    'res128': gngan.ResDiscriminator128,
 }
 
 loss_fns = {
@@ -137,11 +137,12 @@ def train():
         num_workers=FLAGS.num_workers, drop_last=True)
 
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
-    net_D = models.GradNorm(net_D_models[FLAGS.arch]()).to(device)
-    if FLAGS.parallel:
-        net_G = torch.nn.DataParallel(net_G)
-        net_D = torch.nn.DataParallel(net_D)
+    net_D = gngan.GradNorm(net_D_models[FLAGS.arch]()).to(device)
+    net_GD = gngan.GenDis(net_G, net_D)
     loss_fn = loss_fns[FLAGS.loss]()
+
+    if FLAGS.parallel:
+        net_GD = torch.nn.DataParallel(net_GD)
 
     # ema
     if FLAGS.ema:
@@ -183,39 +184,51 @@ def train():
     looper = infiniteloop(dataloader)
     with trange(1, FLAGS.total_steps + 1, dynamic_ncols=True) as pbar:
         for step in pbar:
-            # Discriminator
-            for _ in range(FLAGS.n_dis):
-                with torch.no_grad():
-                    z.normal_()
-                    fake = net_G(z[: FLAGS.batch_size]).detach()
-                real, _ = next(looper)
-                real = real.to(device)
-                net_D_real = net_D(real)
-                net_D_fake = net_D(fake)
-                loss, loss_real, loss_fake = loss_fn(net_D_real, net_D_fake)
+            loss_list = []
+            loss_real_list = []
+            loss_fake_list = []
 
+            net_D.train()
+            for _ in range(FLAGS.n_dis):
                 optim_D.zero_grad()
-                loss.backward()
+                for _ in range(FLAGS.D_accumulation):
+                    real, _ = next(looper)
+                    real = real.to(device)
+                    z.normal_()
+                    pred_real, pred_fake = net_GD(z, real)
+                    loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
+                    loss = loss / float(FLAGS.D_accumulation)
+                    loss.backward()
+                    loss_list.append(loss.detach())
+                    loss_real_list.append(loss_real.detach())
+                    loss_fake_list.append(loss_fake.detach())
                 optim_D.step()
 
-                if FLAGS.loss == 'was':
-                    loss = -loss
-                pbar.set_postfix(loss='%.4f' % loss)
+            loss = torch.mean(torch.stack(loss_list))
+            loss_real = torch.mean(torch.stack(loss_real_list))
+            loss_fake = torch.mean(torch.stack(loss_fake_list))
+            if FLAGS.loss == 'was':
+                loss = -loss
+            pbar.set_postfix(
+                loss='%.4f' % loss,
+                loss_real='%.4f' % loss_real,
+                loss_fake='%.4f' % loss_fake)
 
-            writer.add_scalar('loss', loss, step)
-            writer.add_scalar('loss_real', loss_real, step)
-            writer.add_scalar('loss_fake', loss_fake, step)
+            writer.add_scalar('loss', loss.item(), step)
+            writer.add_scalar('loss_real', loss_real.item(), step)
+            writer.add_scalar('loss_fake', loss_fake.item(), step)
 
-            # Generator
-            z.normal_()
-            x = net_G(z)
-            with module_no_grad(net_D):
-                loss = loss_fn(net_D(x))
-
+            net_G.train()
             optim_G.zero_grad()
-            loss.backward()
+            for _ in range(FLAGS.G_accumulation):
+                z.normal_()
+                with module_no_grad(net_D):
+                    loss = loss_fn(net_GD(z))
+                loss = loss / float(FLAGS.G_accumulation)
+                loss.backward()
             optim_G.step()
 
+            # scheduler
             if FLAGS.scheduler:
                 sched_G.step()
                 sched_D.step()
@@ -231,8 +244,8 @@ def train():
                 fake_imgs = []
                 with torch.no_grad():
                     for fixed_z_batch in fixed_z:
-                        fake = (net_G(fixed_z_batch).cpu() + 1) / 2
-                        fake_imgs.append(fake)
+                        fake = net_G(fixed_z_batch).cpu()
+                        fake_imgs.append((fake + 1) / 2)
                     grid = make_grid(torch.cat(fake_imgs, dim=0))
                 writer.add_image('sample', grid, step)
                 save_image(grid, os.path.join(
@@ -240,10 +253,8 @@ def train():
 
             if step == 1 or step % FLAGS.eval_step == 0:
                 ckpt = {
-                    'net_G': (net_G.module.state_dict()
-                              if FLAGS.parallel else net_G.state_dict()),
-                    'net_D': (net_D.module.state_dict()
-                              if FLAGS.parallel else net_D.state_dict()),
+                    'net_G': net_G.state_dict(),
+                    'net_D': net_D.state_dict(),
                     'optim_G': optim_G.state_dict(),
                     'optim_D': optim_D.state_dict(),
                     'sched_G': sched_G.state_dict() if sched_G else None,
@@ -251,11 +262,13 @@ def train():
                     'net_G_ema': net_G_ema.state_dict() if FLAGS.ema else None,
                 }
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
-                if FLAGS.record:
-                    if FLAGS.ema:
-                        evaluate(net_G_ema, writer, pbar, step)
-                    else:
-                        evaluate(net_G, writer, pbar, step)
+                if FLAGS.ema:
+                    eval_G = net_G_ema
+                else:
+                    eval_G = net_G
+                if FLAGS.parallel:
+                    eval_G = torch.nn.DataParallel(eval_G)
+                evaluate(eval_G, writer, pbar, step)
     writer.close()
 
 

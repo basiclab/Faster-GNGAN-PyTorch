@@ -10,10 +10,10 @@ from tqdm import trange
 
 from models import biggan, gngan
 from common import losses
+from common.score.score import get_inception_and_fid_score
 from common.utils import (
     ema, generate_conditional_imgs, generate_and_save, module_no_grad,
     infiniteloop, set_seed)
-from common.score.score import get_inception_and_fid_score
 
 
 net_G_models = {
@@ -65,7 +65,6 @@ flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
 flags.DEFINE_integer('sample_size', 64, "sampling size of images")
 flags.DEFINE_string('logdir', './logs/BIGGAN/CIFAR10/0', 'log folder')
 flags.DEFINE_string('fid_cache', './stats/cifar10_test.npz', 'FID cache')
-flags.DEFINE_bool('record', True, "record inception score and FID score")
 # generate sample
 flags.DEFINE_bool('generate', False, 'generate images')
 flags.DEFINE_string('pretrain', None, 'path to test model')
@@ -94,7 +93,7 @@ def evaluate(net_G, writer, pbar, step):
         net_G, FLAGS.n_classes, FLAGS.z_dim, FLAGS.num_images,
         FLAGS.batch_size)
     (is_mean, is_std), fid_score = get_inception_and_fid_score(
-        imgs, FLAGS.fid_cache, verbose=True)
+        imgs, FLAGS.fid_cache, verbose=True, parallel=FLAGS.parallel)
     pbar.write("%s/%s Inception Score: %.3f(%.5f), FID Score: %6.3f" % (
         step, FLAGS.total_steps, is_mean, is_std, fid_score))
     writer.add_scalar('inception_score', is_mean, step)
@@ -125,24 +124,24 @@ def train():
         num_workers=FLAGS.num_workers, drop_last=True)
 
     # model
-    net_G = biggan.Generator32(
+    net_G = net_G_models[FLAGS.arch](
         FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
     if FLAGS.GN:
-        net_D = biggan.Discriminator32(
+        net_D = net_D_models[FLAGS.arch](
             FLAGS.ch, FLAGS.n_classes, sn=lambda x: x).to(device)
         net_D = gngan.GradNorm(net_D)
     else:
-        net_D = biggan.Discriminator32(
+        net_D = net_D_models[FLAGS.arch](
             FLAGS.ch, FLAGS.n_classes).to(device)
     net_GD = biggan.GenDis(net_G, net_D)
+    loss_fn = loss_fns[FLAGS.loss]()
 
     if FLAGS.parallel:
         net_GD = torch.nn.DataParallel(net_GD)
-    loss_fn = loss_fns[FLAGS.loss]()
 
     # ema
     if FLAGS.ema:
-        net_G_ema = biggan.Generator32(
+        net_G_ema = net_G_models[FLAGS.arch](
             FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
         ema(net_G, net_G_ema, decay=0)
 
@@ -262,10 +261,8 @@ def train():
 
             if step == 1 or step % FLAGS.eval_step == 0:
                 ckpt = {
-                    'net_G': (net_G.module.state_dict()
-                              if FLAGS.parallel else net_G.state_dict()),
-                    'net_D': (net_D.module.state_dict()
-                              if FLAGS.parallel else net_D.state_dict()),
+                    'net_G': net_G.state_dict(),
+                    'net_D': net_D.state_dict(),
                     'optim_G': optim_G.state_dict(),
                     'optim_D': optim_D.state_dict(),
                     'sched_G': sched_G.state_dict() if sched_G else None,
@@ -273,11 +270,13 @@ def train():
                     'net_G_ema': net_G_ema.state_dict() if FLAGS.ema else None,
                 }
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
-                if FLAGS.record:
-                    if FLAGS.ema:
-                        evaluate(net_G_ema, writer, pbar, step)
-                    else:
-                        evaluate(net_G, writer, pbar, step)
+                if FLAGS.ema:
+                    eval_G = net_G_ema
+                else:
+                    eval_G = net_G
+                if FLAGS.parallel:
+                    eval_G = torch.nn.DataParallel(eval_G)
+                evaluate(eval_G, writer, pbar, step)
     writer.close()
 
 
