@@ -281,7 +281,7 @@ class GenDis(nn.Module):
     def forward(self, z, y_fake, x_real=None, y_real=None, **kwargs):
         if x_real is not None and y_real is not None:
             with torch.no_grad():
-                x_fake = self.net_G(z, self.net_G.shared(y_fake)).detach()
+                x_fake = self.net_G(z, y_fake)
             x = torch.cat([x_real, x_fake], dim=0)
             y = torch.cat([y_real, y_fake], dim=0)
             pred = self.net_D(x, y=y)
@@ -289,7 +289,7 @@ class GenDis(nn.Module):
                 pred, [x_real.shape[0], x_fake.shape[0]])
             return net_D_real, net_D_fake
         else:
-            x_fake = self.net_G(z, self.net_G.shared(y_fake))
+            x_fake = self.net_G(z, y_fake)
             net_D_fake = self.net_D(x_fake, y=y_fake)
             return net_D_fake
 
@@ -301,3 +301,14 @@ def weights_init(m):
             # torch.nn.init.kaiming_normal_(module.weight.data)
             # if hasattr(module, 'bias') and module.bias is not None:
             #     torch.nn.init.zeros_(module.bias.data)
+
+
+generators = {
+    'biggan32': Generator32,
+    'biggan128': Generator128,
+}
+
+discriminators = {
+    'biggan32': Discriminator32,
+    'biggan128': Discriminator128,
+}

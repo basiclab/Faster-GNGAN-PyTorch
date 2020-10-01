@@ -1,6 +1,7 @@
 import os
 
 import h5py as h5
+import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision.datasets import ImageFolder
 from torchvision.transforms import Resize, Compose, ToTensor, ToPILImage
@@ -64,6 +65,9 @@ class ImageNet(Dataset):
                         f['labels'].shape[0] + y.shape[0], axis=0)
                     f['labels'][-y.shape[0]:] = y
 
+    def __len__(self):
+        return len(self.images)
+
     def __getitem__(self, idx):
         if self.in_memory:
             image = self.images[idx]
@@ -72,11 +76,17 @@ class ImageNet(Dataset):
             with h5.File(self.h5_path, 'r') as f:
                 image = f['images'][idx]
                 label = f['labels'][idx]
-        image = ToPILImage()(image)
+        image = ToPILImage()(torch.tensor(image))
         if self.transform is not None:
             image = self.transform(image)
+        else:
+            image = ToTensor()(image)
         return image, label
 
 
 if __name__ == "__main__":
-    dataset = ImageNet('./data/ILSVRC2012/train')
+    dataset = ImageNet('./data/ILSVRC2012/train', in_memory=True)
+    print(len(dataset))
+    image, label = dataset[0]
+    print('image', image.shape, image.dtype, image.min(), image.max())
+    print('label', label.shape, label.dtype)
