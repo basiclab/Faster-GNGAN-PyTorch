@@ -1,4 +1,5 @@
 import os
+from copy import deepcopy
 
 import torch
 import torch.optim as optim
@@ -41,6 +42,7 @@ flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
 flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
 flags.DEFINE_bool('parallel', False, 'multi-gpu training')
+flags.DEFINE_float('cr', 0, "weight for consistency regularization")
 flags.DEFINE_integer('seed', 0, "random seed")
 # logging
 flags.DEFINE_integer('eval_step', 5000, "evaluate FID and Inception Score")
@@ -90,6 +92,24 @@ def evaluate(net_G, writer, pbar, step):
     writer.add_scalar('inception_score_std', is_std, step)
     writer.add_scalar('fid_score', fid_score, step)
     writer.flush()
+
+
+def consistency_loss(net_D, real, pred_real):
+    consistency_transforms = transforms.Compose([
+        transforms.Lambda(lambda x: (x + 1) / 2),
+        transforms.ToPILImage(mode='RGB'),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomAffine(0, translate=(0.2, 0.2)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    ])
+
+    aug_real = deepcopy(real.cpu())
+    for idx, img in enumerate(aug_real):
+        aug_real[idx] = consistency_transforms(img)
+    aug_real = aug_real.to(device)
+    loss = ((net_D(aug_real) - pred_real) ** 2).mean()
+    return loss
 
 
 def train():
@@ -202,7 +222,11 @@ def train():
                 z.normal_()
                 pred_real, pred_fake = net_GD(z[: FLAGS.batch_size], real)
                 loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
-                loss.backward()
+                loss_all = loss
+                if FLAGS.cr > 0:
+                    loss_cr = consistency_loss(net_D, real, pred_real)
+                    loss_all += FLAGS.cr * loss_cr
+                loss_all.backward()
                 loss_list.append(loss.detach())
                 loss_real_list.append(loss_real.detach())
                 loss_fake_list.append(loss_fake.detach())
