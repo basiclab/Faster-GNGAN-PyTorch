@@ -3,7 +3,7 @@
 --dataset=imagenet128
 --D_lr=0.0002
 --eval_step=2000
---fid_cache=./stats/imagenet_train.npz
+--fid_cache=./stats/imagenet128_train.npz.npz
 --G_lr=0.0002
 --logdir=./logs/GN-GAN_IMAGENET128_RES_0
 --loss=hinge

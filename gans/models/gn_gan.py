@@ -332,7 +332,7 @@ class GenDis(nn.Module):
 
 
 def weights_init(m):
-    modules = (torch.nn.Conv2d, torch.nn.ConvTranspose2d)
+    modules = (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)
     for module in m.modules():
         if isinstance(module, modules):
             torch.nn.init.kaiming_normal_(module.weight.data)
@@ -341,8 +341,9 @@ def weights_init(m):
 
 
 def dcgan_weights_init(model):
+    modules = (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)
     for name, module in model.named_modules():
-        if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+        if isinstance(module, modules):
             torch.nn.init.normal_(module.weight, std=0.02)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)

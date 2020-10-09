@@ -8,35 +8,25 @@ from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
-from models import gn_gan, gn_cgan, sn_cgan
-from common import losses
-from common.dataset import ImageNet
+from models import sn_cgan, gn_cgan, gn_gan
+from common.losses import loss_fns
 from common.score.score import get_inception_and_fid_score
 from common.utils import (
     ema, generate_conditional_imgs, generate_and_save, module_no_grad,
     infiniteloop, set_seed)
 
-loss_fns = {
-    'bce': losses.BCEWithLogits,
-    'hinge': losses.Hinge,
-    'was': losses.Wasserstein,
-    'softplus': losses.Softplus
-}
-
 
 FLAGS = flags.FLAGS
 # model and training
-flags.DEFINE_enum(
-    'dataset', 'cifar10', ['cifar10', 'imagenet128', 'imagenet128.hdf5'],
-    "select dataset")
-flags.DEFINE_enum('arch', 'res32', gn_cgan.generators.keys(), "architecture")
-flags.DEFINE_enum('norm', 'GN', ['GN', 'SN'], "normalization techniques")
+flags.DEFINE_enum('dataset', 'cifar10', ['cifar10', 'imagenet128'], "dataset")
+flags.DEFINE_enum('arch', 'res32', sn_cgan.generators.keys(), "architecture")
+flags.DEFINE_enum('norm', 'SN', ['GN', 'SN'], "normalization techniques")
 flags.DEFINE_integer('n_classes', 10, 'the number of classes in dataset')
 flags.DEFINE_integer('total_steps', 100000, "total number of training steps")
 flags.DEFINE_integer('lr_decay_start', 0, 'apply linearly decay to lr')
 flags.DEFINE_integer('batch_size', 64, "batch size")
 flags.DEFINE_integer('num_workers', 8, "dataloader workers")
-flags.DEFINE_integer('G_accumulation', 1, 'gradient accumulation for G')
+flags.DEFINE_integer('G_accumulation', 1, 'gradient accumulation for net_G')
 flags.DEFINE_integer('D_accumulation', 1, 'gradient accumulation for D')
 flags.DEFINE_float('G_lr', 2e-4, "Generator learning rate")
 flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
@@ -53,9 +43,9 @@ flags.DEFINE_integer('ema_start', 1000, "start step for ema")
 flags.DEFINE_integer('eval_step', 5000, "evaluate FID and Inception Score")
 flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
 flags.DEFINE_integer('sample_size', 64, "sampling size of images")
-flags.DEFINE_string('logdir', './logs/GN-cGAN_CIFAR10_RES_0', 'log folder')
+flags.DEFINE_string('logdir', './logs/SN-cGAN_CIFAR10_0', 'log folder')
 flags.DEFINE_string('fid_cache', './stats/cifar10_test.npz', 'FID cache')
-# generate
+# generate sample
 flags.DEFINE_bool('generate', False, 'generate images')
 flags.DEFINE_string('pretrain', None, 'path to test model')
 flags.DEFINE_string('output', './outputs', 'path to output dir')
@@ -67,7 +57,6 @@ device = torch.device('cuda:0')
 def generate():
     assert FLAGS.pretrain is not None, "set model weight by --pretrain [model]"
 
-    # model
     if FLAGS.norm == 'GN':
         Generator = gn_cgan.generators[FLAGS.arch]
         net_G = Generator(FLAGS.n_classes, FLAGS.z_dim).to(device)
@@ -106,7 +95,6 @@ def train():
         dataset = datasets.CIFAR10(
             './data', train=True, download=True,
             transform=transforms.Compose([
-                transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
             ]))
@@ -115,16 +103,6 @@ def train():
             './data/ILSVRC2012/train',
             transform=transforms.Compose([
                 transforms.Resize((128, 128)),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]))
-    if FLAGS.dataset == 'imagenet128.hdf5':
-        dataset = ImageNet(
-            './data/ILSVRC2012/train',
-            size=128, in_memory=True,
-            transform=transforms.Compose([
-                transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
             ]))
@@ -193,10 +171,10 @@ def train():
     writer.add_image('real_sample', grid)
     writer.flush()
 
-    z = torch.zeros(
-        2 * FLAGS.batch_size, FLAGS.z_dim, dtype=torch.float).to(device)
-    y = torch.zeros(
-        2 * FLAGS.batch_size, dtype=torch.long).to(device)
+    z_rand = torch.zeros(
+        FLAGS.batch_size, FLAGS.z_dim, dtype=torch.float).to(device)
+    y_rand = torch.zeros(
+        FLAGS.batch_size, dtype=torch.long).to(device)
 
     looper = infiniteloop(dataloader)
     with trange(1, FLAGS.total_steps + 1, dynamic_ncols=True) as pbar:
@@ -212,11 +190,10 @@ def train():
                 for _ in range(FLAGS.D_accumulation):
                     x_real, y_real = next(looper)
                     x_real, y_real = x_real.to(device), y_real.to(device)
-                    z.normal_()
-                    y.random_(FLAGS.n_classes)
+                    z_rand.normal_()
+                    y_rand.random_(FLAGS.n_classes)
                     pred_real, pred_fake = net_GD(
-                        z[: FLAGS.batch_size], y[: FLAGS.batch_size],
-                        x_real, y_real)
+                        z_rand, y_rand, x_real, y_real)
                     loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
                     loss = loss / float(FLAGS.D_accumulation)
                     loss.backward()
@@ -243,17 +220,13 @@ def train():
             net_G.train()
             optim_G.zero_grad()
             for _ in range(FLAGS.G_accumulation):
-                z.normal_()
-                y.random_(FLAGS.n_classes)
+                z_rand.normal_()
+                y_rand.random_(FLAGS.n_classes)
                 with module_no_grad(net_D):
-                    loss = loss_fn(net_GD(z, y))
+                    loss = loss_fn(net_GD(z_rand, y_rand))
                 loss = loss / float(FLAGS.G_accumulation)
                 loss.backward()
             optim_G.step()
-
-            # scheduler
-            sched_G.step()
-            sched_D.step()
 
             # ema
             if step < FLAGS.ema_start:
@@ -261,6 +234,10 @@ def train():
             else:
                 decay = FLAGS.ema_decay
             ema(net_G, ema_G, decay)
+
+            # scheduler
+            sched_G.step()
+            sched_D.step()
 
             if step == 1 or step % FLAGS.sample_step == 0:
                 fake_imgs = []
@@ -290,7 +267,9 @@ def train():
                 else:
                     eval_net_G = net_G
                     eval_ema_G = ema_G
+                pbar.write('Evalutation')
                 evaluate(eval_net_G, writer, pbar, step)
+                pbar.write('Evalutation(ema)')
                 evaluate(eval_ema_G, writer_ema, pbar, step)
     writer.close()
 

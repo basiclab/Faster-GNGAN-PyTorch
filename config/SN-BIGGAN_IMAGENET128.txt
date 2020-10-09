@@ -1,5 +1,5 @@
 --arch=biggan128
---batch_size=32
+--batch_size=64
 --betas=0.0
 --betas=0.999
 --ch=96
@@ -12,13 +12,13 @@
 --fid_cache=./stats/imagenet128_train.npz
 --G_accumulation=8
 --G_lr=0.0001
---logdir=./logs/GN-BIGGAN_IMAGENET128_0
+--logdir=./logs/SN-BIGGAN_IMAGENET128_0
 --loss=hinge
 --lr_decay_start=1000000
 --n_classes=1000
 --n_dis=1
---norm=GN
---num_images=50000
+--norm=SN
+--num_images=10000
 --sample_size=64
 --sample_step=500
 --seed=0

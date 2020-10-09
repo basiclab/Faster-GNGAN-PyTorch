@@ -114,8 +114,6 @@ class Generator32(nn.Module):
             spectral_norm(
                 nn.Conv2d(ch * 4, 3, 3, padding=1)),     # 3 x 32 x 32
             nn.Tanh())
-        self.shared = nn.Identity()
-        # if not kwargs['skip_init']:
         weights_init(self)
 
     def forward(self, z, y):
@@ -233,7 +231,6 @@ class Discriminator32(nn.Module):
 
         self.linear = sn(nn.Linear(ch * 4, 1))
         self.embedding = sn(nn.Embedding(n_classes, ch * 4))
-        # if not kwargs['skip_init']:
         weights_init(self)
 
     def forward(self, x, y):
@@ -281,7 +278,7 @@ class GenDis(nn.Module):
     def forward(self, z, y_fake, x_real=None, y_real=None, **kwargs):
         if x_real is not None and y_real is not None:
             with torch.no_grad():
-                x_fake = self.net_G(z, y_fake)
+                x_fake = self.net_G(z, y_fake).detach()
             x = torch.cat([x_real, x_fake], dim=0)
             y = torch.cat([y_real, y_fake], dim=0)
             pred = self.net_D(x, y=y)
@@ -298,9 +295,6 @@ def weights_init(m):
     for module in m.modules():
         if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
             torch.nn.init.normal_(module.weight, 0, 0.02)
-            # torch.nn.init.kaiming_normal_(module.weight.data)
-            # if hasattr(module, 'bias') and module.bias is not None:
-            #     torch.nn.init.zeros_(module.bias.data)
 
 
 generators = {

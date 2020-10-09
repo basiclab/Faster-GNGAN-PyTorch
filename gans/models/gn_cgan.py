@@ -215,11 +215,11 @@ class GenDis(nn.Module):
 
 
 def weights_init(m):
-    modules = (torch.nn.Conv2d, torch.nn.ConvTranspose2d)
+    modules = (nn.Conv2d, nn.ConvTranspose2d, nn.Linear, nn.Embedding)
     for module in m.modules():
         if isinstance(module, modules):
             torch.nn.init.kaiming_normal_(module.weight.data)
-            if module.bias is not None:
+            if hasattr(module, 'bias') and module.bias is not None:
                 torch.nn.init.zeros_(module.bias.data)
 
 

@@ -49,3 +49,11 @@ class Softplus(nn.Module):
         else:
             loss = F.softplus(-pred_real).mean()
             return loss
+
+
+loss_fns = {
+    'bce': BCEWithLogits,
+    'hinge': Hinge,
+    'was': Wasserstein,
+    'softplus': Softplus
+}

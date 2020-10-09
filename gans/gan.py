@@ -10,19 +10,11 @@ from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from models import gn_gan, sn_gan
-from common import losses
+from common.losses import loss_fns
 from common.dataset import ImageNet
 from common.score.score import get_inception_and_fid_score
 from common.utils import (
     generate_imgs, generate_and_save, infiniteloop, module_no_grad, set_seed)
-
-loss_fns = {
-    'bce': losses.BCEWithLogits,
-    'hinge': losses.Hinge,
-    'was': losses.Wasserstein,
-    'softplus': losses.Softplus
-}
-
 
 FLAGS = flags.FLAGS
 # model and training
@@ -213,6 +205,9 @@ def train():
             loss_real_list = []
             loss_fake_list = []
 
+            if FLAGS.cr > 0:
+                loss_cr_list = []
+
             # Discriminator
             net_D.train()
             for _ in range(FLAGS.n_dis):
@@ -226,6 +221,7 @@ def train():
                 if FLAGS.cr > 0:
                     loss_cr = consistency_loss(net_D, real, pred_real)
                     loss_all += FLAGS.cr * loss_cr
+                    loss_cr_list.append(loss_cr.detach())
                 loss_all.backward()
                 loss_list.append(loss.detach())
                 loss_real_list.append(loss_real.detach())
@@ -235,6 +231,8 @@ def train():
             loss = torch.mean(torch.stack(loss_list))
             loss_real = torch.mean(torch.stack(loss_real_list))
             loss_fake = torch.mean(torch.stack(loss_fake_list))
+            if FLAGS.cr > 0:
+                loss_cr = torch.mean(torch.stack(loss_cr_list))
             if FLAGS.loss == 'was':
                 loss = -loss
             pbar.set_postfix(
@@ -245,6 +243,8 @@ def train():
             writer.add_scalar('loss', loss.item(), step)
             writer.add_scalar('loss_real', loss_real.item(), step)
             writer.add_scalar('loss_fake', loss_fake.item(), step)
+            if FLAGS.cr > 0:
+                writer.add_scalar('loss_cr', loss_cr.item(), step)
 
             # Generator
             net_G.train()
