@@ -210,16 +210,13 @@ class GenDis(nn.Module):
 
 
 def weights_init(m):
+    modules = (nn.Conv2d, nn.ConvTranspose2d, nn.Linear, nn.Embedding)
     for name, module in m.named_modules():
-        if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d)):
+        if isinstance(module, modules):
             if 'residual' in name:
                 torch.nn.init.xavier_uniform_(module.weight, gain=math.sqrt(2))
             else:
                 torch.nn.init.xavier_uniform_(module.weight, gain=1.0)
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        if isinstance(module, (nn.Linear, nn.Embedding)):
-            torch.nn.init.xavier_uniform_(module.weight, gain=1.0)
             if hasattr(module, 'bias') and module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
 

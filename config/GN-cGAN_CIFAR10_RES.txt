@@ -6,7 +6,7 @@
 --G_lr=0.0002
 --logdir=./logs/GN-cGAN_CIFAR10_RES_0
 --loss=hinge
---lr_decay_start=0
+--lr_decay_start=200000
 --n_classes=10
 --n_dis=5
 --norm=GN
