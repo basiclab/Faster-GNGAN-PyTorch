@@ -22,29 +22,27 @@ class ConditionalBatchNorm2d(nn.Module):
 class ResGenBlock(nn.Module):
     def __init__(self, in_channels, out_channels, n_classes):
         super().__init__()
+
         # residual
         self.bn1 = ConditionalBatchNorm2d(in_channels, n_classes)
-        self.relu1 = nn.ReLU(inplace=True)
-        self.upsample1 = nn.Upsample(scale_factor=2)
-        self.conv1 = nn.Conv2d(
-            in_channels, out_channels, 3, stride=1, padding=1)
+        self.residual1 = nn.Sequential(
+            nn.ReLU(inplace=True),
+            nn.Upsample(scale_factor=2),
+            nn.Conv2d(in_channels, out_channels, 3, stride=1, padding=1))
         self.bn2 = ConditionalBatchNorm2d(out_channels, n_classes)
-        self.relu2 = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv2d(
-            out_channels, out_channels, 3, stride=1, padding=1)
+        self.residual2 = nn.Sequential(
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1))
+
         # shortcut
-        self.upsample2 = nn.Upsample(scale_factor=2)
-        self.conv3 = nn.Conv2d(
-            in_channels, out_channels, 1, stride=1, padding=0)
+        self.shortcut = nn.Sequential(
+            nn.Upsample(scale_factor=2),
+            nn.Conv2d(in_channels, out_channels, 1, stride=1, padding=0))
 
     def forward(self, x, y):
-        h1 = self.upsample1(self.relu1(self.bn1(x, y)))
-        h1 = self.conv1(h1)
-        h1 = self.relu2(self.bn2(h1, y))
-        h1 = self.conv2(h1)
-
-        h2 = self.conv3(self.upsample2(x))
-        return h1 + h2
+        h = self.residual1(self.bn1(x, y))
+        h = self.residual2(self.bn2(h, y))
+        return h + self.shortcut(x)
 
 
 class ResGenerator32(nn.Module):
