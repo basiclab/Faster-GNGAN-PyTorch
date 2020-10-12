@@ -49,7 +49,7 @@ class Generator(nn.Module):
             nn.ReLU(True),
             nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1),
             nn.Tanh())
-        dcgan_weights_init(self)
+        weights_init(self)
 
     def forward(self, z):
         x = self.linear(z)
@@ -84,7 +84,7 @@ class Discriminator(nn.Module):
             nn.LeakyReLU(0.1, inplace=True))
 
         self.linear = nn.Linear(M // 8 * M // 8 * 512, 1)
-        dcgan_weights_init(self)
+        weights_init(self)
 
     def forward(self, x):
         x = self.main(x)
@@ -338,15 +338,6 @@ def weights_init(m):
             torch.nn.init.kaiming_normal_(module.weight.data)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias.data)
-
-
-def dcgan_weights_init(model):
-    modules = (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)
-    for name, module in model.named_modules():
-        if isinstance(module, modules):
-            torch.nn.init.normal_(module.weight, std=0.02)
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
 
 
 generators = {

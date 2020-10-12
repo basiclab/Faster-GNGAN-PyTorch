@@ -2,7 +2,6 @@ import math
 
 import torch
 import torch.nn as nn
-import torch.nn.init as init
 from torch.nn.utils.spectral_norm import spectral_norm
 
 
@@ -29,7 +28,7 @@ class Generator(nn.Module):
             nn.ReLU(True),
             nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1),
             nn.Tanh())
-        dcgan_weights_init(self)
+        weights_init(self)
 
     def forward(self, z):
         x = self.linear(z)
@@ -73,7 +72,7 @@ class Discriminator(nn.Module):
             nn.LeakyReLU(0.1, inplace=True))
 
         self.linear = spectral_norm(nn.Linear(M // 8 * M // 8 * 512, 1))
-        dcgan_weights_init(self)
+        weights_init(self)
 
     def forward(self, x):
         x = self.main(x)
@@ -314,27 +313,17 @@ class GenDis(nn.Module):
             return net_D_fake
 
 
-def weights_init(model):
-    for name, module in model.named_modules():
-        if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d)):
+def weights_init(m):
+    modules = (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)
+    for name, module in m.named_modules():
+        if isinstance(module, modules):
+            # https://github.com/pfnet-research/sngan_projection/blob/master/dis_models/resblocks.py#L16
             if 'residual' in name:
-                init.xavier_uniform_(module.weight, gain=math.sqrt(2))
+                torch.nn.init.xavier_uniform_(module.weight, gain=math.sqrt(2))
             else:
-                init.xavier_uniform_(module.weight, gain=1.0)
+                torch.nn.init.xavier_uniform_(module.weight, gain=1.0)
             if module.bias is not None:
-                init.zeros_(module.bias)
-        if isinstance(module, nn.Linear):
-            init.xavier_uniform_(module.weight, gain=1.0)
-            if module.bias is not None:
-                init.zeros_(module.bias)
-
-
-def dcgan_weights_init(model):
-    for name, module in model.named_modules():
-        if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
-            init.normal_(module.weight, std=0.02)
-            if module.bias is not None:
-                init.zeros_(module.bias)
+                torch.nn.init.zeros_(module.bias)
 
 
 generators = {
