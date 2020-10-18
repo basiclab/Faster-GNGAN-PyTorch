@@ -37,6 +37,7 @@ flags.DEFINE_bool('parallel', False, 'multi-gpu training')
 flags.DEFINE_float('cr', 0, "weight for consistency regularization")
 flags.DEFINE_integer('seed', 0, "random seed")
 # logging
+flags.DEFINE_bool('eval_use_torch', False, 'calculate IS and FID on gpu')
 flags.DEFINE_integer('eval_step', 5000, "evaluate FID and Inception Score")
 flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
 flags.DEFINE_integer('sample_size', 64, "sampling size of images")
@@ -77,7 +78,8 @@ def evaluate(net_G, writer, pbar, step):
         FLAGS.num_images,
         FLAGS.batch_size)
     (is_mean, is_std), fid_score = get_inception_and_fid_score(
-        imgs, FLAGS.fid_cache, verbose=True, parallel=FLAGS.parallel)
+        imgs, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch, verbose=True,
+        parallel=FLAGS.parallel)
     pbar.write("%s/%s Inception Score: %.3f(%.5f), FID Score: %6.3f" % (
         step, FLAGS.total_steps, is_mean, is_std, fid_score))
     writer.add_scalar('inception_score', is_mean, step)
