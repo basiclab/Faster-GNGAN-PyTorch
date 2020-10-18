@@ -116,7 +116,7 @@ def train():
             ]))
     if FLAGS.dataset == 'imagenet128':
         dataset = datasets.ImageFolder(
-            './data/ILSVRC2012/train',
+            './data/imagenet/train',
             transform=transforms.Compose([
                 transforms.Resize((128, 128)),
                 transforms.ToTensor(),

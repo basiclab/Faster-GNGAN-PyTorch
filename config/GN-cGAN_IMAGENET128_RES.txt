@@ -1,4 +1,4 @@
---arch=res128
+--arch=res128_concat
 --batch_size=16
 --dataset=imagenet128
 --D_lr=0.0002

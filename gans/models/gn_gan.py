@@ -295,6 +295,7 @@ class ResDiscriminator128(nn.Module):
             ResDisBlock(128, 256, down=True),
             ResDisBlock(256, 512, down=True),
             ResDisBlock(512, 1024, down=True),
+            ResDisBlock(1024, 1024),
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 1)))
         self.linear = nn.Linear(1024, 1)
@@ -332,9 +333,8 @@ class GenDis(nn.Module):
 
 
 def weights_init(m):
-    modules = (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)
     for module in m.modules():
-        if isinstance(module, modules):
+        if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
             torch.nn.init.kaiming_normal_(module.weight.data)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias.data)

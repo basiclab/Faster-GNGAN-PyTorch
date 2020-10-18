@@ -15,7 +15,7 @@ class ConditionalBatchNorm2d(nn.Module):
         self.register_buffer('stored_var',  torch.ones(in_channel))
 
     def forward(self, x, y):
-        gain = self.gain(y).view(y.size(0), -1, 1, 1) + 1
+        gain = self.gain(y).view(y.size(0), -1, 1, 1)
         bias = self.bias(y).view(y.size(0), -1, 1, 1)
         x = F.batch_norm(
             x, self.stored_mean, self.stored_var, None, None, self.training)
@@ -110,7 +110,7 @@ class OptimizedResDisblock(nn.Module):
             spectral_norm(nn.Conv2d(in_channels, out_channels, 1, 1, 0)))
         self.residual = nn.Sequential(
             spectral_norm(nn.Conv2d(in_channels, out_channels, 3, 1, 1)),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             spectral_norm(nn.Conv2d(out_channels, out_channels, 3, 1, 1)),
             nn.AvgPool2d(2))
 
@@ -132,7 +132,7 @@ class ResDisBlock(nn.Module):
         residual = [
             nn.ReLU(),
             spectral_norm(nn.Conv2d(in_channels, out_channels, 3, 1, 1)),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             spectral_norm(nn.Conv2d(out_channels, out_channels, 3, 1, 1)),
         ]
         if down:
@@ -146,7 +146,7 @@ class ResDisBlock(nn.Module):
 class ResDiscriminator32(nn.Module):
     def __init__(self, n_classes):
         super().__init__()
-        self.model = nn.Sequential(
+        self.main = nn.Sequential(
             OptimizedResDisblock(3, 128),
             ResDisBlock(128, 128, down=True),
             ResDisBlock(128, 128),
@@ -157,28 +157,54 @@ class ResDiscriminator32(nn.Module):
         weights_init(self)
 
     def forward(self, x, y):
-        x = self.model(x).sum(dim=[2, 3])
+        x = self.main(x).sum(dim=[2, 3])
         x = self.linear(x) + (self.embedding(y) * x).sum(dim=1, keepdim=True)
         return x
 
 
-class ResDiscriminator128(nn.Module):
+class ResConcatDiscriminator128(nn.Module):
     def __init__(self, n_classes):
         super().__init__()
-        self.model = nn.Sequential(
+        self.main1 = nn.Sequential(
+            OptimizedResDisblock(3, 64),
+            ResDisBlock(64, 128, down=True),
+            ResDisBlock(128, 256, down=True))
+        self.embed = spectral_norm(nn.Embedding(n_classes, 128))
+        self.main2 = nn.Sequential(
+            ResDisBlock(256 + 128, 512, down=True),
+            ResDisBlock(512, 1024, down=True),
+            ResDisBlock(1024, 1024),
+            nn.ReLU(inplace=True))
+        self.linear = spectral_norm(nn.Linear(1024, 1))
+        weights_init(self)
+
+    def forward(self, x, y):
+        x = self.main1(x)
+        e = self.embed(y).unsqueeze(-1).unsqueeze(-1)
+        x = torch.cat([x, e.expand(-1, -1, x.shape[2], x.shape[2])], dim=1)
+        x = self.main2(x).sum([2, 3])
+        x = self.linear(x)
+        return x
+
+
+class ResPorjectDiscriminator128(nn.Module):
+    def __init__(self, n_classes):
+        super().__init__()
+        self.main = nn.Sequential(
             OptimizedResDisblock(3, 64),
             ResDisBlock(64, 128, down=True),
             ResDisBlock(128, 256, down=True),
             ResDisBlock(256, 512, down=True),
             ResDisBlock(512, 1024, down=True),
-            nn.ReLU())
+            ResDisBlock(1024, 1024),
+            nn.ReLU(inplace=True))
+        self.embed = spectral_norm(nn.Embedding(n_classes, 1024))
         self.linear = spectral_norm(nn.Linear(1024, 1))
-        self.embedding = spectral_norm(nn.Embedding(n_classes, 1024))
         weights_init(self)
 
     def forward(self, x, y):
-        x = self.model(x).sum(dim=[2, 3])
-        x = self.linear(x) + (self.embedding(y) * x).sum(dim=1, keepdim=True)
+        x = self.main(x).sum(dim=[2, 3])
+        x = self.linear(x) + (self.embed(y) * x).sum(dim=1, keepdim=True)
         return x
 
 
@@ -210,23 +236,31 @@ class GenDis(nn.Module):
 
 
 def weights_init(m):
-    modules = (nn.Conv2d, nn.ConvTranspose2d, nn.Linear, nn.Embedding)
     for name, module in m.named_modules():
-        if isinstance(module, modules):
+        if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
             if 'residual' in name:
                 torch.nn.init.xavier_uniform_(module.weight, gain=math.sqrt(2))
             else:
                 torch.nn.init.xavier_uniform_(module.weight, gain=1.0)
-            if hasattr(module, 'bias') and module.bias is not None:
+            if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
+        if isinstance(module, nn.Embedding):
+            if 'gain' in name:
+                torch.nn.init.ones_(module.weight)
+            elif 'bias' in name:
+                torch.nn.init.zeros_(module.weight)
+            else:
+                torch.nn.init.xavier_uniform_(module.weight)
 
 
 generators = {
     'res32': ResGenerator32,
-    'res128': ResGenerator128,
+    'res128_concat': ResGenerator128,
+    'res128_project': ResGenerator128,
 }
 
 discriminators = {
     'res32': ResDiscriminator32,
-    'res128': ResDiscriminator128,
+    'res128_concat': ResConcatDiscriminator128,
+    'res128_project': ResPorjectDiscriminator128,
 }
