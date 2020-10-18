@@ -11,6 +11,7 @@ from tqdm import trange
 
 from models import biggan, gn_gan
 from common.losses import loss_fns
+from common.dataset import ImageNet
 from common.score.score import get_inception_and_fid_score
 from common.utils import (
     ema, generate_conditional_imgs, generate_and_save, module_no_grad,
@@ -121,6 +122,15 @@ def train():
             './data/imagenet/train',
             transform=transforms.Compose([
                 transforms.Resize((128, 128)),
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            ]))
+    if FLAGS.dataset == 'imagenet128.hdf5':
+        dataset = ImageNet(
+            './data/ILSVRC2012/train',
+            size=128, in_memory=True,
+            transform=transforms.Compose([
+                transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
             ]))
