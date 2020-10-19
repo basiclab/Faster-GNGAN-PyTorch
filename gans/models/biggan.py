@@ -10,29 +10,29 @@ class Attention(nn.Module):
     """
     def __init__(self, ch, sn=spectral_norm):
         super().__init__()
-        self.f = sn(nn.Conv2d(
+        self.q = sn(nn.Conv2d(
             ch, ch // 8, kernel_size=1, padding=0, bias=False))
-        self.g = sn(nn.Conv2d(
+        self.k = sn(nn.Conv2d(
             ch, ch // 8, kernel_size=1, padding=0, bias=False))
-        self.h = sn(nn.Conv2d(
-            ch, ch // 2, kernel_size=1, padding=0, bias=False))
         self.v = sn(nn.Conv2d(
+            ch, ch // 2, kernel_size=1, padding=0, bias=False))
+        self.o = sn(nn.Conv2d(
             ch // 2, ch, kernel_size=1, padding=0, bias=False))
         self.gamma = nn.Parameter(torch.tensor(0.), requires_grad=True)
 
     def forward(self, x, y=None):
         B, C, H, W = x.size()
-        f = self.f(x)
-        g = F.max_pool2d(self.g(x), [2, 2])
-        h = F.max_pool2d(self.h(x), [2, 2])
+        q = self.q(x)
+        k = F.max_pool2d(self.k(x), [2, 2])
+        v = F.max_pool2d(self.v(x), [2, 2])
         # flatten
-        f = f.view(B, C // 8, H * W)
-        g = g.view(B, C // 8, H * W // 4)
-        h = h.view(B, C // 2, H * W // 4)
+        q = q.view(B, C // 8, H * W)            # query
+        k = k.view(B, C // 8, H * W // 4)       # key
+        v = v.view(B, C // 2, H * W // 4)       # value
         # attention weights
-        w = F.softmax(torch.bmm(f.transpose(1, 2), g), -1)
+        w = F.softmax(torch.bmm(q.transpose(1, 2), k), -1)
         # attend and project
-        o = self.v(torch.bmm(h, w.transpose(1, 2)).view(B, C // 2, H, W))
+        o = self.o(torch.bmm(v, w.transpose(1, 2)).view(B, C // 2, H, W))
         return self.gamma * o + x
 
 
@@ -55,7 +55,6 @@ class ConditionalBatchNorm2d(nn.Module):
         bias = self.bias(y).view(y.size(0), -1, 1, 1)
         x = F.batch_norm(
             x, self.stored_mean, self.stored_var, None, None, self.training)
-        # x = self.batchnorm(x)
         return x * gain + bias
 
 
@@ -125,7 +124,7 @@ class Generator32(nn.Module):
 
 
 class Generator128(nn.Module):
-    def __init__(self, ch=96, n_classes=1000, z_dim=128, shared_dim=128):
+    def __init__(self, ch=96, n_classes=1000, z_dim=120, shared_dim=128):
         super().__init__()
         channels_multipler = [16, 16, 8, 4, 2, 1]
         num_slots = len(channels_multipler)

@@ -297,6 +297,9 @@ def train():
                     'sched_G': sched_G.state_dict(),
                     'sched_D': sched_D.state_dict(),
                     'ema_G': ema_G.state_dict(),
+                    'step': step,
+                    'fixed_z': fixed_z,
+                    'fixed_y': fixed_y,
                 }
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
                 if FLAGS.parallel:

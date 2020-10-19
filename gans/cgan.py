@@ -18,6 +18,8 @@ from common.utils import (
 
 
 FLAGS = flags.FLAGS
+# resume
+flags.DEFINE_bool('resume', False, 'resume from logdir')
 # model and training
 flags.DEFINE_enum('dataset', 'cifar10',
                   ['cifar10', 'imagenet128', 'imagenet128.hdf5'], "dataset")
@@ -160,29 +162,47 @@ def train():
     sched_G = optim.lr_scheduler.LambdaLR(optim_G, lr_lambda=decay_rate)
     sched_D = optim.lr_scheduler.LambdaLR(optim_D, lr_lambda=decay_rate)
 
-    # sample fixed z and y
-    os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
-    writer = SummaryWriter(FLAGS.logdir)
-    writer_ema = SummaryWriter(FLAGS.logdir + "_ema")
-    fixed_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
-    fixed_z = torch.split(fixed_z, FLAGS.batch_size, dim=0)
-    fixed_y = torch.randint(FLAGS.n_classes, (FLAGS.sample_size,)).to(device)
-    fixed_y = torch.split(fixed_y, FLAGS.batch_size, dim=0)
-    with open(os.path.join(FLAGS.logdir, "flagfile.txt"), 'w') as f:
-        f.write(FLAGS.flags_into_string())
-    writer.add_text(
-        "flagfile", FLAGS.flags_into_string().replace('\n', '  \n'))
+    if FLAGS.resume:
+        ckpt = torch.load(os.path.join(FLAGS.logdir, 'model.pt'))
+        net_G.load_state_dict(ckpt['net_G'])
+        net_D.load_state_dict(ckpt['net_D'])
+        optim_G.load_state_dict(ckpt['optim_G'])
+        optim_D.load_state_dict(ckpt['optim_D'])
+        sched_G.load_state_dict(ckpt['sched_G'])
+        sched_D.load_state_dict(ckpt['sched_D'])
+        ema_G.load_state_dict(ckpt['ema_G'])
+        fixed_z = ckpt['fixed_z']
+        fixed_y = ckpt['fixed_y']
+        start = ckpt['step'] + 1
+        writer = SummaryWriter(FLAGS.logdir)
+        writer_ema = SummaryWriter(FLAGS.logdir + "_ema")
+        del ckpt
+    else:
+        # sample fixed z and y
+        os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
+        writer = SummaryWriter(FLAGS.logdir)
+        writer_ema = SummaryWriter(FLAGS.logdir + "_ema")
+        fixed_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
+        fixed_z = torch.split(fixed_z, FLAGS.batch_size, dim=0)
+        fixed_y = torch.randint(
+            FLAGS.n_classes, (FLAGS.sample_size,)).to(device)
+        fixed_y = torch.split(fixed_y, FLAGS.batch_size, dim=0)
+        with open(os.path.join(FLAGS.logdir, "flagfile.txt"), 'w') as f:
+            f.write(FLAGS.flags_into_string())
+        writer.add_text(
+            "flagfile", FLAGS.flags_into_string().replace('\n', '  \n'))
 
-    # sample real data
-    real = []
-    for x, _ in dataloader:
-        real.append(x)
-        if len(real) * FLAGS.batch_size >= FLAGS.sample_size:
-            real = torch.cat(real, dim=0)[:FLAGS.sample_size]
-            break
-    grid = (make_grid(real) + 1) / 2
-    writer.add_image('real_sample', grid)
-    writer.flush()
+        # sample real data
+        real = []
+        for x, _ in dataloader:
+            real.append(x)
+            if len(real) * FLAGS.batch_size >= FLAGS.sample_size:
+                real = torch.cat(real, dim=0)[:FLAGS.sample_size]
+                break
+        grid = (make_grid(real) + 1) / 2
+        writer.add_image('real_sample', grid)
+        writer.flush()
+        start = 1
 
     z_rand = torch.zeros(
         FLAGS.batch_size, FLAGS.z_dim, dtype=torch.float).to(device)
@@ -190,7 +210,8 @@ def train():
         FLAGS.batch_size, dtype=torch.long).to(device)
 
     looper = infiniteloop(dataloader)
-    with trange(1, FLAGS.total_steps + 1, dynamic_ncols=True) as pbar:
+    with trange(start, FLAGS.total_steps + 1, dynamic_ncols=True,
+                initial=start, total=FLAGS.total_steps) as pbar:
         for step in pbar:
             loss_list = []
             loss_real_list = []
@@ -214,6 +235,9 @@ def train():
                     loss_real_list.append(loss_real.detach())
                     loss_fake_list.append(loss_fake.detach())
                 optim_D.step()
+
+            import time
+            time.sleep(20)
 
             loss = torch.mean(torch.stack(loss_list))
             loss_real = torch.mean(torch.stack(loss_real_list))
@@ -272,6 +296,9 @@ def train():
                     'sched_G': sched_G.state_dict(),
                     'sched_D': sched_D.state_dict(),
                     'ema_G': ema_G.state_dict(),
+                    'step': step,
+                    'fixed_z': fixed_z,
+                    'fixed_y': fixed_y,
                 }
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
                 if FLAGS.parallel:

@@ -17,6 +17,8 @@ from common.utils import (
     generate_imgs, generate_and_save, infiniteloop, module_no_grad, set_seed)
 
 FLAGS = flags.FLAGS
+# resume
+flags.DEFINE_bool('resume', False, 'resume from logdir')
 # model and training
 flags.DEFINE_enum(
     'dataset', 'cifar10',
@@ -178,30 +180,44 @@ def train():
     sched_G = optim.lr_scheduler.LambdaLR(optim_G, lr_lambda=decay_rate)
     sched_D = optim.lr_scheduler.LambdaLR(optim_D, lr_lambda=decay_rate)
 
-    os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
-    writer = SummaryWriter(FLAGS.logdir)
-    fixed_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
-    fixed_z = torch.split(fixed_z, FLAGS.batch_size, dim=0)
-    with open(os.path.join(FLAGS.logdir, "flagfile.txt"), 'w') as f:
-        f.write(FLAGS.flags_into_string())
-    writer.add_text(
-        "flagfile", FLAGS.flags_into_string().replace('\n', '  \n'))
-
-    real = []
-    for x, _ in dataloader:
-        real.append(x)
-        if len(real) * FLAGS.batch_size >= FLAGS.sample_size:
-            real = torch.cat(real, dim=0)[:FLAGS.sample_size]
-            break
-    grid = (make_grid(real) + 1) / 2
-    writer.add_image('real_sample', grid)
-    writer.flush()
+    if FLAGS.resume:
+        ckpt = torch.load(os.path.join(FLAGS.logdir, 'model.pt'))
+        net_G.load_state_dict(ckpt['net_G'])
+        net_D.load_state_dict(ckpt['net_D'])
+        optim_G.load_state_dict(ckpt['optim_G'])
+        optim_D.load_state_dict(ckpt['optim_D'])
+        sched_G.load_state_dict(ckpt['sched_G'])
+        sched_D.load_state_dict(ckpt['sched_D'])
+        fixed_z = ckpt['fixed_z']
+        start = ckpt['step'] + 1
+        writer = SummaryWriter(FLAGS.logdir)
+        del ckpt
+    else:
+        os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
+        writer = SummaryWriter(FLAGS.logdir)
+        fixed_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
+        fixed_z = torch.split(fixed_z, FLAGS.batch_size, dim=0)
+        with open(os.path.join(FLAGS.logdir, "flagfile.txt"), 'w') as f:
+            f.write(FLAGS.flags_into_string())
+        writer.add_text(
+            "flagfile", FLAGS.flags_into_string().replace('\n', '  \n'))
+        real = []
+        for x, _ in dataloader:
+            real.append(x)
+            if len(real) * FLAGS.batch_size >= FLAGS.sample_size:
+                real = torch.cat(real, dim=0)[:FLAGS.sample_size]
+                break
+        grid = (make_grid(real) + 1) / 2
+        writer.add_image('real_sample', grid)
+        writer.flush()
+        start = 1
 
     z = torch.randn(2 * FLAGS.batch_size, FLAGS.z_dim, requires_grad=False)
     z = z.to(device)
 
     looper = infiniteloop(dataloader)
-    with trange(1, FLAGS.total_steps + 1, dynamic_ncols=True) as pbar:
+    with trange(start, FLAGS.total_steps + 1, dynamic_ncols=True,
+                initial=start, total=FLAGS.total_steps) as pbar:
         for step in pbar:
             loss_list = []
             loss_real_list = []
@@ -280,6 +296,8 @@ def train():
                     'optim_D': optim_D.state_dict(),
                     'sched_G': sched_G.state_dict(),
                     'sched_D': sched_D.state_dict(),
+                    'step': step,
+                    'fixed_z': fixed_z,
                 }
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
                 if FLAGS.parallel:
