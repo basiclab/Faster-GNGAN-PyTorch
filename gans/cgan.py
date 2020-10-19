@@ -236,9 +236,6 @@ def train():
                     loss_fake_list.append(loss_fake.detach())
                 optim_D.step()
 
-            import time
-            time.sleep(20)
-
             loss = torch.mean(torch.stack(loss_list))
             loss_real = torch.mean(torch.stack(loss_real_list))
             loss_fake = torch.mean(torch.stack(loss_fake_list))
