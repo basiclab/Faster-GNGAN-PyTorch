@@ -13,7 +13,7 @@
 --fid_cache=./stats/imagenet128_train.npz
 --G_accumulation=4
 --G_lr=0.0001
---logdir=./logs/SN-BIGGAN_IMAGENET128_0
+--logdir=./logs/SN-BIGGAN_IMAGENET128_0_bs256x4
 --loss=hinge
 --lr_decay_start=150000
 --n_classes=1000
