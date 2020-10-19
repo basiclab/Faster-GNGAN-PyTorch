@@ -223,4 +223,5 @@ def get_fid_score(images, stats_cache, batch_size=50, use_torch=False,
 
     if use_torch:
         fid_value = fid_value.cpu().item()
+    del model
     return fid_value

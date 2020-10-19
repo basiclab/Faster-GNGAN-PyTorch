@@ -60,5 +60,5 @@ def get_inception_score(images, splits=10, batch_size=32, use_torch=False,
             torch.mean(scores).cpu().item(), torch.std(scores).cpu().item())
     else:
         is_mean, is_std = np.mean(scores), np.std(scores)
-    del preds, scores
+    del preds, scores, model
     return is_mean, is_std

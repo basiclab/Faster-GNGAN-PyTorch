@@ -79,6 +79,7 @@ def module_no_grad(m: torch.nn.Module):
     requires_grad_dict = dict()
     for name, param in m.named_parameters():
         requires_grad_dict[name] = param.requires_grad
+        param.requires_grad_(False)
     yield m
     for name, param in m.named_parameters():
         param.requires_grad_(requires_grad_dict[name])

@@ -91,5 +91,5 @@ def get_inception_and_fid_score(images, fid_cache, is_splits=10, batch_size=50,
         s1 = np.cov(fid_acts, rowvar=False)
     fid_score = calculate_frechet_distance(m1, s1, m2, s2, use_torch=use_torch)
 
-    del fid_acts, is_probs, scores
+    del fid_acts, is_probs, scores, model
     return is_score, fid_score
