@@ -22,7 +22,8 @@ FLAGS = flags.FLAGS
 # resume
 flags.DEFINE_bool('resume', False, 'resume from logdir')
 # model and training
-flags.DEFINE_enum('dataset', 'cifar10', ['cifar10', 'imagenet128'], "dataset")
+flags.DEFINE_enum('dataset', 'cifar10',
+                  ['cifar10', 'imagenet128', 'imagenet128.hdf5'], "dataset")
 flags.DEFINE_enum('arch', 'biggan32', biggan.generators.keys(), "architecture")
 flags.DEFINE_enum('norm', 'GN', ['GN', 'SN'], "normalization techniques")
 flags.DEFINE_integer('ch', 64, 'base channel size of BigGAN')
