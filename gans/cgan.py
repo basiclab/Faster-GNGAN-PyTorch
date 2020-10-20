@@ -205,9 +205,9 @@ def train():
         start = 1
 
     z_rand = torch.zeros(
-        FLAGS.batch_size, FLAGS.z_dim, dtype=torch.float).to(device)
+        FLAGS.batch_size * 2, FLAGS.z_dim, dtype=torch.float).to(device)
     y_rand = torch.zeros(
-        FLAGS.batch_size, dtype=torch.long).to(device)
+        FLAGS.batch_size * 2, dtype=torch.long).to(device)
 
     looper = infiniteloop(dataloader)
     with trange(start, FLAGS.total_steps + 1, dynamic_ncols=True,
@@ -227,7 +227,10 @@ def train():
                     z_rand.normal_()
                     y_rand.random_(FLAGS.n_classes)
                     pred_real, pred_fake = net_GD(
-                        z_rand, y_rand, x_real, y_real)
+                        z_rand[: FLAGS.batch_size],
+                        y_rand[: FLAGS.batch_size],
+                        x_real,
+                        y_real)
                     loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
                     loss = loss / float(FLAGS.D_accumulation)
                     loss.backward()

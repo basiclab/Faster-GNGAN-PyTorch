@@ -6,7 +6,7 @@
 --G_lr=0.0002
 --logdir=./logs/GN-GAN_CIFAR10_CNN_0
 --loss=bce
---lr_decay_start=100000
+--lr_decay_start=200000
 --n_dis=1
 --norm=GN
 --num_images=10000
