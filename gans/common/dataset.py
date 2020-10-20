@@ -30,7 +30,7 @@ class ImageNet(Dataset):
 
         if in_memory:
             with h5.File(self.h5_path, 'r') as f:
-                self.images = f['images'][:]
+                self.images = f['imgs'][:]
                 self.labels = f['labels'][:]
 
     def create_hdf5(self, root, h5_path, chunk_size, size):
@@ -42,7 +42,7 @@ class ImageNet(Dataset):
         with h5.File(h5_path, 'w') as f:
             print('Dataset size: %d' % len(dataloader.dataset))
             imgs_dset = f.create_dataset(
-                'images', (0, 3, size, size), dtype='uint8',
+                'imgs', (0, 3, size, size), dtype='uint8',
                 maxshape=(len(dataloader.dataset), 3, size, size),
                 chunks=(chunk_size, 3, size, size))
             print('Image chunks chosen as:', imgs_dset.chunks)
@@ -58,9 +58,9 @@ class ImageNet(Dataset):
                 x = (x * 255).byte().numpy()
                 y = y.numpy()
                 with h5.File(h5_path, 'a') as f:
-                    f['images'].resize(
-                        f['images'].shape[0] + x.shape[0], axis=0)
-                    f['images'][-x.shape[0]:] = x
+                    f['imgs'].resize(
+                        f['imgs'].shape[0] + x.shape[0], axis=0)
+                    f['imgs'][-x.shape[0]:] = x
                     f['labels'].resize(
                         f['labels'].shape[0] + y.shape[0], axis=0)
                     f['labels'][-y.shape[0]:] = y
@@ -74,7 +74,7 @@ class ImageNet(Dataset):
             label = self.labels[idx]
         else:
             with h5.File(self.h5_path, 'r') as f:
-                image = f['images'][idx]
+                image = f['imgs'][idx]
                 label = f['labels'][idx]
         image = ToPILImage()(torch.tensor(image))
         if self.transform is not None:
