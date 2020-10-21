@@ -1,4 +1,4 @@
---arch=biggan32
+--arch=res32
 --batch_size=50
 --betas=0.0
 --betas=0.999

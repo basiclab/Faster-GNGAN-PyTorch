@@ -158,7 +158,7 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6,
         out = (diff.dot(diff) +
                torch.trace(sigma1) +
                torch.trace(sigma2) -
-               2 * torch.trace(covmean))
+               2 * torch.trace(covmean)).cpu().item()
     else:
         mu1 = np.atleast_1d(mu1)
         mu2 = np.atleast_1d(mu2)

@@ -12,7 +12,7 @@ class ConditionalBatchNorm2d(nn.Module):
         self.register_buffer('stored_var',  torch.ones(in_channel))
 
     def forward(self, x, y):
-        gain = self.gain(y).view(y.size(0), -1, 1, 1)
+        gain = self.gain(y).view(y.size(0), -1, 1, 1) + 1
         bias = self.bias(y).view(y.size(0), -1, 1, 1)
         x = F.batch_norm(
             x, self.stored_mean, self.stored_var, None, None, self.training)
@@ -147,15 +147,13 @@ class ResDiscriminator32(nn.Module):
             ResDisBlock(128, 128, down=True),
             ResDisBlock(128, 128),
             ResDisBlock(128, 128),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d(1))
+            nn.ReLU())
         self.linear = nn.Linear(128, 1, bias=False)
         self.embedding = nn.Embedding(n_classes, 128)
         weights_init(self)
 
     def forward(self, x, y):
-        x = self.main(x)
-        x = torch.flatten(x, start_dim=1)
+        x = self.main(x).sum(dim=[2, 3])
         x = self.linear(x) + (self.embedding(y) * x).sum(dim=1, keepdim=True)
         return x
 
@@ -172,8 +170,7 @@ class ResConcatDiscriminator128(nn.Module):
             ResDisBlock(256 + 128, 512, down=True),
             ResDisBlock(512, 1024, down=True),
             ResDisBlock(1024, 1024),
-            nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d(1))
+            nn.ReLU(inplace=True))
         self.linear = nn.Linear(1024, 1)
         weights_init(self)
 
@@ -181,8 +178,7 @@ class ResConcatDiscriminator128(nn.Module):
         x = self.main1(x)
         e = self.embed(y).unsqueeze(-1).unsqueeze(-1)
         x = torch.cat([x, e.expand(-1, -1, x.shape[2], x.shape[2])], dim=1)
-        x = self.main2(x)
-        x = torch.flatten(x, start_dim=1)
+        x = self.main2(x).sum([2, 3])
         x = self.linear(x)
         return x
 
@@ -197,15 +193,13 @@ class ResPorjectDiscriminator128(nn.Module):
             ResDisBlock(256, 512, down=True),
             ResDisBlock(512, 1024, down=True),
             ResDisBlock(1024, 1024),
-            nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d(1))
+            nn.ReLU(inplace=True))
         self.embed = nn.Embedding(n_classes, 1024)
         self.linear = nn.Linear(1024, 1)
         weights_init(self)
 
     def forward(self, x, y):
-        x = self.main(x)
-        x = torch.flatten(x, start_dim=1)
+        x = self.main(x).sum(dim=[2, 3])
         x = self.linear(x) + (self.embed(y) * x).sum(dim=1, keepdim=True)
         return x
 
@@ -239,17 +233,10 @@ class GenDis(nn.Module):
 
 def weights_init(m):
     for name, module in m.named_modules():
-        if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+        if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
             torch.nn.init.xavier_uniform_(module.weight)
-            if module.bias is not None:
+            if hasattr(module, 'bias') and module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
-        if isinstance(module, nn.Embedding):
-            if 'gain' in name:
-                torch.nn.init.ones_(module.weight)
-            elif 'bias' in name:
-                torch.nn.init.zeros_(module.weight)
-            else:
-                torch.nn.init.xavier_uniform_(module.weight)
 
 
 generators = {

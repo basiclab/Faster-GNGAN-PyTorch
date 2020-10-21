@@ -1,20 +1,21 @@
 import os
+import json
 from copy import deepcopy
 
 import torch
 import torch.optim as optim
 from absl import flags, app
-from torchvision import datasets, transforms
+from torchvision import transforms
 from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from models import gn_gan, sn_gan
 from common.losses import loss_fns
-from common.dataset import ImageNet
+from common.dataset import get_dataset
 from common.score.score import get_inception_and_fid_score
 from common.utils import (
-    generate_imgs, generate_and_save, infiniteloop, module_no_grad, set_seed)
+    generate_images, save_images, module_no_grad, infiniteloop, set_seed)
 
 FLAGS = flags.FLAGS
 # resume
@@ -65,29 +66,28 @@ def generate():
         net_G = Generator(FLAGS.z_dim).to(device)
     net_G.load_state_dict(torch.load(FLAGS.pretrain)['net_G'])
 
-    generate_and_save(
-        net_G,
-        FLAGS.output_dir,
-        FLAGS.z_dim,
-        FLAGS.num_images,
-        FLAGS.batch_size)
+    images = generate_images(
+        net_G=net_G,
+        z_dim=FLAGS.z_dim,
+        num_images=FLAGS.num_images,
+        batch_size=FLAGS.batch_size,
+        verbose=True)
+    save_images(images=images, output_dir=FLAGS.output_dir)
 
 
-def evaluate(net_G, writer, pbar, step):
-    imgs = generate_imgs(
-        net_G,
-        FLAGS.z_dim,
-        FLAGS.num_images,
-        FLAGS.batch_size)
-    (is_mean, is_std), fid_score = get_inception_and_fid_score(
-        imgs, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch, verbose=True,
+def evaluate(net_G):
+    images = generate_images(
+        net_G=net_G,
+        z_dim=FLAGS.z_dim,
+        n_classes=FLAGS.n_classes,
+        num_images=FLAGS.num_images,
+        batch_size=FLAGS.batch_size,
+        verbose=False)
+    (IS, IS_std), FID = get_inception_and_fid_score(
+        images, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch,
         parallel=FLAGS.parallel)
-    pbar.write("%s/%s Inception Score: %.3f(%.5f), FID Score: %6.3f" % (
-        step, FLAGS.total_steps, is_mean, is_std, fid_score))
-    writer.add_scalar('inception_score', is_mean, step)
-    writer.add_scalar('inception_score_std', is_std, step)
-    writer.add_scalar('fid_score', fid_score, step)
-    writer.flush()
+    del images
+    return (IS, IS_std), FID
 
 
 def consistency_loss(net_D, real, pred_real):
@@ -109,42 +109,7 @@ def consistency_loss(net_D, real, pred_real):
 
 
 def train():
-    if FLAGS.dataset == 'cifar10':
-        dataset = datasets.CIFAR10(
-            './data', train=True, download=True,
-            transform=transforms.Compose([
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]))
-    if FLAGS.dataset == 'stl10':
-        dataset = datasets.STL10(
-            './data', split='unlabeled', download=True,
-            transform=transforms.Compose([
-                transforms.Resize((48, 48)),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]))
-    if FLAGS.dataset == 'imagenet128':
-        dataset = datasets.ImageFolder(
-            './data/imagenet/train',
-            transform=transforms.Compose([
-                transforms.Resize((128, 128)),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]))
-    if FLAGS.dataset == 'imagenet128.hdf5':
-        dataset = ImageNet(
-            './data/ILSVRC2012/train',
-            size=128, in_memory=True,
-            transform=transforms.Compose([
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]))
-
+    dataset = get_dataset(FLAGS.dataset)
     dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=FLAGS.batch_size, shuffle=True,
         num_workers=FLAGS.num_workers, drop_last=True)
@@ -304,7 +269,25 @@ def train():
                     eval_net_G = torch.nn.DataParallel(net_G)
                 else:
                     eval_net_G = net_G
-                evaluate(eval_net_G, writer, pbar, step)
+                (net_G_IS, net_G_IS_std), net_G_FID = evaluate(eval_net_G)
+                pbar.write(
+                    "%6d/%6d "
+                    "IS: %5.3f(%.3f), FID: %6.3f" % (
+                        step, FLAGS.total_steps,
+                        net_G_IS, net_G_IS_std, net_G_FID))
+                writer.add_scalar('IS', net_G_IS, step)
+                writer.add_scalar('IS_std', net_G_IS_std, step)
+                writer.add_scalar('FID', net_G_FID, step)
+                writer.flush()
+                with open(os.path.join(FLAGS.logdir, 'eval.txt'), 'a') as f:
+                    f.write(json.dumps(
+                        {
+                            'step': step,
+                            'IS': net_G_IS,
+                            'IS_std': net_G_IS_std,
+                            'FID': net_G_FID,
+                        }) + "\n"
+                    )
     writer.close()
 
 

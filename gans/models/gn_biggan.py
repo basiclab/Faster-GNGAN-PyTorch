@@ -1,14 +1,18 @@
+from functools import partial
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.utils import spectral_norm
+
+
+sn = partial(torch.nn.utils.spectral_norm, eps=1e-6)
 
 
 class Attention(nn.Module):
     """
     SA-GAN: https://arxiv.org/abs/1805.08318
     """
-    def __init__(self, ch, sn=spectral_norm):
+    def __init__(self, ch):
         super().__init__()
         self.q = sn(nn.Conv2d(
             ch, ch // 8, kernel_size=1, padding=0, bias=False))
@@ -37,10 +41,9 @@ class Attention(nn.Module):
 
 
 class ConditionalBatchNorm2d(nn.Module):
-    def __init__(self, in_channel, cond_size, use_linear=True,
-                 sn=spectral_norm):
+    def __init__(self, in_channel, cond_size, linear=True):
         super().__init__()
-        if use_linear:
+        if linear:
             self.gain = sn(nn.Linear(cond_size, in_channel, bias=False))
             self.bias = sn(nn.Linear(cond_size, in_channel, bias=False))
         else:
@@ -59,31 +62,26 @@ class ConditionalBatchNorm2d(nn.Module):
 
 
 class GenBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, shared_input_size,
-                 use_linear=True):
+    def __init__(self, in_channels, out_channels, cbn_in_dim, cbn_linear=True):
         """
-            shared_input_size(int): output size of shared embedding
-            use_linear(bool): use linear layer in conditional batchnorm to
-                              project shared embedding to gain and bias.
-                              Otherwise, use embedding in conditional batchnorm
+            cbn_in_dim(int): output size of shared embedding
+            cbn_linear(bool): use linear layer in conditional batchnorm to
+                              get gain and bias of normalization. Otherwise,
+                              use embedding.
         """
         super().__init__()
 
         self.shorcut = nn.Sequential(
             nn.Upsample(scale_factor=2),
-            spectral_norm(nn.Conv2d(in_channels, out_channels, 1, padding=0)))
+            sn(nn.Conv2d(in_channels, out_channels, 1, padding=0)))
 
         # residual
-        self.bn1 = ConditionalBatchNorm2d(
-            in_channels, shared_input_size, use_linear)
+        self.bn1 = ConditionalBatchNorm2d(in_channels, cbn_in_dim, cbn_linear)
         self.activation = nn.ReLU(inplace=True)
         self.upsample = nn.Upsample(scale_factor=2)
-        self.conv1 = spectral_norm(
-            nn.Conv2d(in_channels, out_channels, 3, padding=1))
-        self.bn2 = ConditionalBatchNorm2d(
-            out_channels, shared_input_size, use_linear)
-        self.conv2 = spectral_norm(
-            nn.Conv2d(out_channels, out_channels, 3, padding=1))
+        self.conv1 = sn(nn.Conv2d(in_channels, out_channels, 3, padding=1))
+        self.bn2 = ConditionalBatchNorm2d(out_channels, cbn_in_dim, cbn_linear)
+        self.conv2 = sn(nn.Conv2d(out_channels, out_channels, 3, padding=1))
 
     def forward(self, x, y):
         # residual
@@ -101,7 +99,7 @@ class Generator32(nn.Module):
     def __init__(self, ch=64, n_classes=10, z_dim=128):
         super().__init__()
         # channels_multipler = [4, 4, 4, 4]
-        self.linear = spectral_norm(nn.Linear(z_dim, (ch * 4) * 4 * 4))
+        self.linear = sn(nn.Linear(z_dim, (ch * 4) * 4 * 4))
         self.blocks = nn.ModuleList([
             GenBlock(ch * 4, ch * 4, n_classes, False),  # 4ch x 8 x 8
             GenBlock(ch * 4, ch * 4, n_classes, False),  # 4ch x 16 x 16
@@ -110,8 +108,7 @@ class Generator32(nn.Module):
         self.output_layer = nn.Sequential(
             nn.BatchNorm2d(ch * 4),
             nn.ReLU(inplace=True),
-            spectral_norm(
-                nn.Conv2d(ch * 4, 3, 3, padding=1)),     # 3 x 32 x 32
+            sn(nn.Conv2d(ch * 4, 3, 3, padding=1)),      # 3 x 32 x 32
             nn.Tanh())
         weights_init(self)
 
@@ -130,28 +127,26 @@ class Generator128(nn.Module):
         num_slots = len(channels_multipler)
         self.chunk_size = (z_dim // num_slots)
         z_dim = self.chunk_size * num_slots
-        shared_input_size = (shared_dim + self.chunk_size)
+        cbn_in_dim = (shared_dim + self.chunk_size)
 
         self.shared_embedding = nn.Embedding(n_classes, shared_dim)
-        self.linear = spectral_norm(
-            nn.Linear(z_dim // num_slots, (ch * 16) * 4 * 4))
+        self.linear = sn(nn.Linear(z_dim // num_slots, (ch * 16) * 4 * 4))
 
         self.blocks = nn.ModuleList([
-            GenBlock(ch * 16, ch * 16, shared_input_size),  # ch*16 x 4 x 4
-            GenBlock(ch * 16, ch * 8, shared_input_size),   # ch*16 x 8 x 8
-            GenBlock(ch * 8, ch * 4, shared_input_size),    # ch*8 x 16 x 16
-            nn.ModuleList([                                 # ch*4 x 32 x 32
-                GenBlock(ch * 4, ch * 2, shared_input_size),
-                Attention(ch * 2),                          # ch*2 x 64 x 64
+            GenBlock(ch * 16, ch * 16, cbn_in_dim),  # ch*16 x 4 x 4
+            GenBlock(ch * 16, ch * 8, cbn_in_dim),   # ch*16 x 8 x 8
+            GenBlock(ch * 8, ch * 4, cbn_in_dim),    # ch*8 x 16 x 16
+            nn.ModuleList([                          # ch*4 x 32 x 32
+                GenBlock(ch * 4, ch * 2, cbn_in_dim),
+                Attention(ch * 2),                   # ch*2 x 64 x 64
             ]),
-            GenBlock(ch * 2, ch * 1, shared_input_size),    # ch*1 x 128 x 128
+            GenBlock(ch * 2, ch * 1, cbn_in_dim),    # ch*1 x 128 x 128
         ])
 
         self.output_layer = nn.Sequential(
             nn.BatchNorm2d(ch * 1),
             nn.ReLU(inplace=True),
-            spectral_norm(
-                nn.Conv2d(ch * 1, 3, 3, padding=1)),        # 3 x 128 x 128
+            sn(nn.Conv2d(ch * 1, 3, 3, padding=1)),  # 3 x 128 x 128
             nn.Tanh())
         weights_init(self)
 
@@ -173,17 +168,17 @@ class Generator128(nn.Module):
 
 
 class OptimizedDisblock(nn.Module):
-    def __init__(self, in_channels, out_channels, sn=spectral_norm):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
         # shortcut
         self.shortcut = nn.Sequential(
             nn.AvgPool2d(2),
-            sn(nn.Conv2d(in_channels, out_channels, 1, padding=0)))
+            nn.Conv2d(in_channels, out_channels, 1, padding=0))
         # residual
         self.residual = nn.Sequential(
-            sn(nn.Conv2d(in_channels, out_channels, 3, padding=1)),
+            nn.Conv2d(in_channels, out_channels, 3, padding=1),
             nn.ReLU(inplace=True),
-            sn(nn.Conv2d(out_channels, out_channels, 3, padding=1)),
+            nn.Conv2d(out_channels, out_channels, 3, padding=1),
             nn.AvgPool2d(2))
 
     def forward(self, x):
@@ -191,21 +186,20 @@ class OptimizedDisblock(nn.Module):
 
 
 class DisBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, down=False,
-                 sn=spectral_norm):
+    def __init__(self, in_channels, out_channels, down=False):
         super().__init__()
         shortcut = []
         if in_channels != out_channels or down:
-            shortcut.append(sn(nn.Conv2d(in_channels, out_channels, 1, 1, 0)))
+            shortcut.append(nn.Conv2d(in_channels, out_channels, 1, 1, 0))
         if down:
             shortcut.append(nn.AvgPool2d(2))
         self.shortcut = nn.Sequential(*shortcut)
 
         residual = [
             nn.ReLU(),
-            sn(nn.Conv2d(in_channels, out_channels, 3, 1, 1)),
+            nn.Conv2d(in_channels, out_channels, 3, 1, 1),
             nn.ReLU(inplace=True),
-            sn(nn.Conv2d(out_channels, out_channels, 3, 1, 1)),
+            nn.Conv2d(out_channels, out_channels, 3, 1, 1),
         ]
         if down:
             residual.append(nn.AvgPool2d(2))
@@ -216,20 +210,20 @@ class DisBlock(nn.Module):
 
 
 class Discriminator32(nn.Module):
-    def __init__(self, ch=64, n_classes=10, sn=spectral_norm):
+    def __init__(self, ch=64, n_classes=10):
         super().__init__()
         self.fp16 = False
         # channels_multipler = [2, 2, 2, 2]
         self.blocks = nn.Sequential(
-            OptimizedDisblock(3, ch * 4, sn=sn),           # 3 x 32 x 32
-            DisBlock(ch * 4, ch * 4, down=True, sn=sn),    # ch*4 x 16 x 16
-            DisBlock(ch * 4, ch * 4, sn=sn),               # ch*4 x 8 x 8
-            DisBlock(ch * 4, ch * 4, sn=sn),               # ch*4 x 8 x 8
+            OptimizedDisblock(3, ch * 4),           # 3 x 32 x 32
+            DisBlock(ch * 4, ch * 4, down=True),    # ch*4 x 16 x 16
+            DisBlock(ch * 4, ch * 4),               # ch*4 x 8 x 8
+            DisBlock(ch * 4, ch * 4),               # ch*4 x 8 x 8
             nn.ReLU(inplace=True),
         )
 
-        self.linear = sn(nn.Linear(ch * 4, 1))
-        self.embedding = sn(nn.Embedding(n_classes, ch * 4))
+        self.linear = nn.Linear(ch * 4, 1)
+        self.embedding = nn.Embedding(n_classes, ch * 4)
         weights_init(self)
 
     def forward(self, x, y):
@@ -239,22 +233,22 @@ class Discriminator32(nn.Module):
 
 
 class Discriminator128(nn.Module):
-    def __init__(self, ch=96, n_classes=1000, sn=spectral_norm):
+    def __init__(self, ch=96, n_classes=1000):
         super().__init__()
         # channels_multipler = [1, 2, 4, 8, 16, 16]
         self.blocks = nn.Sequential(
-            OptimizedDisblock(3, ch * 1, sn=sn),          # 3 x 128 x 128
-            Attention(ch, sn),                            # ch*1 x 64 x 64
-            DisBlock(ch * 1, ch * 2, down=True, sn=sn),   # ch*1 x 32 x 32
-            DisBlock(ch * 2, ch * 4, down=True, sn=sn),   # ch*2 x 16 x 16
-            DisBlock(ch * 4, ch * 8, down=True, sn=sn),   # ch*4 x 8 x 8
-            DisBlock(ch * 8, ch * 16, down=True, sn=sn),  # ch*8 x 4 x 4
-            DisBlock(ch * 16, ch * 16, sn=sn),            # ch*16 x 4 x 4
-            nn.ReLU(inplace=True),                        # ch*16 x 4 x 4
+            OptimizedDisblock(3, ch * 1),          # 3 x 128 x 128
+            Attention(ch),                         # ch*1 x 64 x 64
+            DisBlock(ch * 1, ch * 2, down=True),   # ch*1 x 32 x 32
+            DisBlock(ch * 2, ch * 4, down=True),   # ch*2 x 16 x 16
+            DisBlock(ch * 4, ch * 8, down=True),   # ch*4 x 8 x 8
+            DisBlock(ch * 8, ch * 16, down=True),  # ch*8 x 4 x 4
+            DisBlock(ch * 16, ch * 16),            # ch*16 x 4 x 4
+            nn.ReLU(inplace=True),                 # ch*16 x 4 x 4
         )
 
-        self.linear = sn(nn.Linear(ch * 16, 1))
-        self.embedding = sn(nn.Embedding(n_classes, ch * 16))
+        self.linear = nn.Linear(ch * 16, 1)
+        self.embedding = nn.Embedding(n_classes, ch * 16)
         weights_init(self)
 
     def forward(self, x, y):
@@ -293,17 +287,19 @@ class GenDis(nn.Module):
 
 
 def weights_init(m):
-    for module in m.modules():
+    for name, module in m.named_modules():
         if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
-            torch.nn.init.normal_(module.weight, 0, 0.02)
+            torch.nn.init.xavier_uniform_(module.weight)
+            if hasattr(module, 'bias') and module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
 
 
 generators = {
-    'biggan32': Generator32,
-    'biggan128': Generator128,
+    'res32': Generator32,
+    'res128': Generator128,
 }
 
 discriminators = {
-    'biggan32': Discriminator32,
-    'biggan128': Discriminator128,
+    'res32': Discriminator32,
+    'res128': Discriminator128,
 }

@@ -2,9 +2,9 @@ import os
 
 import h5py as h5
 import torch
+import torchvision
 from torch.utils.data import Dataset, DataLoader
-from torchvision.datasets import ImageFolder
-from torchvision.transforms import Resize, Compose, ToTensor, ToPILImage
+from torchvision import transforms
 from tqdm import tqdm
 
 
@@ -19,7 +19,7 @@ from tqdm import tqdm
 # 1000 / None               |78/s            |          |        |
 # 5000 / None               |81/s            |          |        |
 # auto:(125,1,16,32) / None |11/s            |          |61GB    |
-class ImageNet(Dataset):
+class ImageNetHDF5(Dataset):
     def __init__(self, root, transform=None,
                  cache='./data', chunk_size=500, size=128, in_memory=False):
         self.transform = transform
@@ -32,13 +32,13 @@ class ImageNet(Dataset):
             with h5.File(self.h5_path, 'r') as f:
                 self.images = f['imgs'][:]
                 self.labels = f['labels'][:]
+            self.num_images = len(self.labels)
+        else:
+            self.num_images = len(h5.File(self.h5_path, 'r')['labels'])
 
     def create_hdf5(self, root, h5_path, chunk_size, size):
         dataloader = DataLoader(
-            dataset=ImageFolder(
-                root=root,
-                transform=Compose([Resize((size, size)), ToTensor()])),
-            batch_size=50, num_workers=8)
+            dataset=get_dataset('imagenet128'), batch_size=50, num_workers=8)
         with h5.File(h5_path, 'w') as f:
             print('Dataset size: %d' % len(dataloader.dataset))
             imgs_dset = f.create_dataset(
@@ -66,7 +66,7 @@ class ImageNet(Dataset):
                     f['labels'][-y.shape[0]:] = y
 
     def __len__(self):
-        return len(self.images)
+        return self.num_images
 
     def __getitem__(self, idx):
         if self.in_memory:
@@ -76,16 +76,74 @@ class ImageNet(Dataset):
             with h5.File(self.h5_path, 'r') as f:
                 image = f['imgs'][idx]
                 label = f['labels'][idx]
-        image = ToPILImage()(torch.tensor(image))
+        image = transforms.functional.to_pil_image(torch.tensor(image))
         if self.transform is not None:
             image = self.transform(image)
         else:
-            image = ToTensor()(image)
+            image = transforms.functional.to_tensor(image)
         return image, label
 
 
+class CenterCropLongEdge(object):
+    """Crops the given PIL Image on the long edge.
+    """
+    def __call__(self, img):
+        """
+        Args:
+            img (PIL Image): Image to be cropped.
+        Returns:
+            PIL Image: Cropped image.
+        """
+        return transforms.functional.center_crop(img, min(img.size))
+
+    def __repr__(self):
+        return self.__class__.__name__
+
+
+def get_dataset(name):
+    assert name in ['cifar10', 'stl10', 'imagenet128', 'imagenet128.hdf5']
+    if name == 'cifar10':
+        return torchvision.datasets.CIFAR10(
+            './data', train=True, download=True,
+            transform=transforms.Compose([
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            ]))
+    if name == 'stl10':
+        return torchvision.datasets.STL10(
+            './data', split='unlabeled', download=True,
+            transform=transforms.Compose([
+                transforms.Resize((48, 48)),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            ]))
+    if name == 'imagenet128':
+        return torchvision.datasets.ImageFolder(
+            './data/imagenet/train',
+            transform=transforms.Compose([
+                CenterCropLongEdge(),
+                transforms.Resize((128, 128)),
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            ]))
+    if name == 'imagenet128.hdf5':
+        return ImageNetHDF5(
+            './data/ILSVRC2012/train', size=128, in_memory=True,
+            transform=transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            ]))
+
+
 if __name__ == "__main__":
-    dataset = ImageNet('./data/ILSVRC2012/train', in_memory=True)
+    dataset = ImageNetHDF5(
+        './data/ILSVRC2012/train', size=128, in_memory=False, cache='./',
+        transform=transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ]))
     print(len(dataset))
     image, label = dataset[0]
     print('image', image.shape, image.dtype, image.min(), image.max())

@@ -1,21 +1,21 @@
 import os
+import json
 from copy import deepcopy
 
 import torch
 import torch.optim as optim
 from absl import flags, app
-from torchvision import datasets, transforms
+from torchvision import transforms
 from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
-from models import biggan, gn_gan
+from models import sn_biggan, gn_biggan, gn_gan
 from common.losses import loss_fns
-from common.dataset import ImageNet
+from common.dataset import get_dataset
 from common.score.score import get_inception_and_fid_score
 from common.utils import (
-    ema, generate_conditional_imgs, generate_and_save, module_no_grad,
-    infiniteloop, set_seed)
+    ema, generate_images, save_images, module_no_grad, infiniteloop, set_seed)
 
 
 FLAGS = flags.FLAGS
@@ -24,7 +24,7 @@ flags.DEFINE_bool('resume', False, 'resume from logdir')
 # model and training
 flags.DEFINE_enum('dataset', 'cifar10',
                   ['cifar10', 'imagenet128', 'imagenet128.hdf5'], "dataset")
-flags.DEFINE_enum('arch', 'biggan32', biggan.generators.keys(), "architecture")
+flags.DEFINE_enum('arch', 'res32', sn_biggan.generators.keys(), "architecture")
 flags.DEFINE_enum('norm', 'GN', ['GN', 'SN'], "normalization techniques")
 flags.DEFINE_integer('ch', 64, 'base channel size of BigGAN')
 flags.DEFINE_integer('n_classes', 10, 'the number of classes in dataset')
@@ -34,10 +34,11 @@ flags.DEFINE_integer('batch_size', 50, "batch size")
 flags.DEFINE_integer('num_workers', 8, "dataloader workers")
 flags.DEFINE_integer('G_accumulation', 1, 'gradient accumulation for net_G')
 flags.DEFINE_integer('D_accumulation', 1, 'gradient accumulation for D')
-flags.DEFINE_float('G_lr', 1e-4, "Generator learning rate")
-flags.DEFINE_float('D_lr', 1e-4, "Discriminator learning rate")
+flags.DEFINE_float('G_lr', 2e-4, "Generator learning rate")
+flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
+flags.DEFINE_float('eps', 1e-6, "for Adam")
 flags.DEFINE_multi_float('betas', [0.0, 0.999], "for Adam")
-flags.DEFINE_integer('n_dis', 4, "update Generator every this steps")
+flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
 flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
 flags.DEFINE_bool('parallel', False, 'multi-gpu training')
@@ -65,36 +66,37 @@ device = torch.device('cuda:0')
 def generate():
     assert FLAGS.pretrain is not None, "set model weight by --pretrain [model]"
 
-    net_G = biggan.generators[FLAGS.arch](FLAGS.z_dim).to(device)
+    if FLAGS.norm == 'GN':
+        Generator = gn_biggan.generators[FLAGS.arch]
+        net_G = Generator(FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
+    if FLAGS.norm == 'SN':
+        Generator = sn_biggan.generators[FLAGS.arch]
+        net_G = Generator(FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
     net_G.load_state_dict(torch.load(FLAGS.pretrain)['net_G'])
 
-    generate_and_save(
-        net_G,
-        FLAGS.output_dir,
-        FLAGS.z_dim,
-        FLAGS.num_images,
-        FLAGS.batch_size)
+    images = generate_images(
+        net_G=net_G,
+        z_dim=FLAGS.z_dim,
+        n_classes=FLAGS.n_classes,
+        num_images=FLAGS.num_images,
+        batch_size=FLAGS.batch_size,
+        verbose=True)
+    save_images(images=images, output_dir=FLAGS.output_dir)
 
 
-def evaluate(net_G, writer, pbar, step):
-    net_G.eval()
-    imgs = generate_conditional_imgs(
-        net_G,
-        FLAGS.n_classes,
-        FLAGS.z_dim,
-        FLAGS.num_images,
-        FLAGS.batch_size)
-    (is_mean, is_std), fid_score = get_inception_and_fid_score(
-        imgs, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch,
+def evaluate(net_G):
+    images = generate_images(
+        net_G=net_G,
+        z_dim=FLAGS.z_dim,
+        n_classes=FLAGS.n_classes,
+        num_images=FLAGS.num_images,
+        batch_size=FLAGS.batch_size,
+        verbose=False)
+    (IS, IS_std), FID = get_inception_and_fid_score(
+        images, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch,
         parallel=FLAGS.parallel)
-    pbar.write("%s/%s Inception Score: %.3f(%.5f), FID Score: %6.3f" % (
-        step, FLAGS.total_steps, is_mean, is_std, fid_score))
-    writer.add_scalar('inception_score', is_mean, step)
-    writer.add_scalar('inception_score_std', is_std, step)
-    writer.add_scalar('fid_score', fid_score, step)
-    writer.flush()
-    net_G.train()
-    del imgs
+    del images
+    return (IS, IS_std), FID
 
 
 def consistency_loss(net_D, x_real, y_real, pred_real):
@@ -116,67 +118,42 @@ def consistency_loss(net_D, x_real, y_real, pred_real):
 
 
 def train():
-    if FLAGS.dataset == 'cifar10':
-        dataset = datasets.CIFAR10(
-            './data', train=True, download=True,
-            transform=transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]))
-    if FLAGS.dataset == 'imagenet128':
-        dataset = datasets.ImageFolder(
-            './data/imagenet/train',
-            transform=transforms.Compose([
-                transforms.Resize((128, 128)),
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]))
-    if FLAGS.dataset == 'imagenet128.hdf5':
-        dataset = ImageNet(
-            './data/ILSVRC2012/train',
-            size=128, in_memory=True,
-            transform=transforms.Compose([
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]))
-
+    dataset = get_dataset(FLAGS.dataset)
     dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=FLAGS.batch_size, shuffle=True,
         num_workers=FLAGS.num_workers, drop_last=True)
 
     # model
-    net_G = biggan.generators[FLAGS.arch](
-        FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
     if FLAGS.norm == 'GN':
-        net_D = biggan.discriminators[FLAGS.arch](
-            FLAGS.ch, FLAGS.n_classes, sn=lambda x: x).to(device)
+        Generator = gn_biggan.generators[FLAGS.arch]
+        Discriminator = gn_biggan.discriminators[FLAGS.arch]
+        net_G = Generator(FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
+        ema_G = Generator(FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
+        net_D = Discriminator(FLAGS.ch, FLAGS.n_classes).to(device)
         net_D = gn_gan.GradNorm(net_D)
+        net_GD = gn_biggan.GenDis(net_G, net_D)
     if FLAGS.norm == 'SN':
-        net_D = biggan.discriminators[FLAGS.arch](
-            FLAGS.ch, FLAGS.n_classes).to(device)
-    net_GD = biggan.GenDis(net_G, net_D)
+        Generator = sn_biggan.generators[FLAGS.arch]
+        Discriminator = sn_biggan.discriminators[FLAGS.arch]
+        net_G = Generator(FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
+        ema_G = Generator(FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
+        net_D = Discriminator(FLAGS.ch, FLAGS.n_classes).to(device)
+        net_GD = sn_biggan.GenDis(net_G, net_D)
 
     if FLAGS.parallel:
         net_GD = torch.nn.DataParallel(net_GD)
 
     # ema
-    ema_G = biggan.generators[FLAGS.arch](
-        FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim).to(device)
     ema(net_G, ema_G, decay=0)
 
     # loss
     loss_fn = loss_fns[FLAGS.loss]()
 
     # optimizer
-    optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
-    optim_D = optim.Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
-
-    # scheduler
-    def decay_rate(step):
-        return 1 - max(step - FLAGS.lr_decay_start, 0) / FLAGS.total_steps
-    sched_G = optim.lr_scheduler.LambdaLR(optim_G, lr_lambda=decay_rate)
-    sched_D = optim.lr_scheduler.LambdaLR(optim_D, lr_lambda=decay_rate)
+    optim_G = optim.Adam(
+        net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas, eps=FLAGS.eps)
+    optim_D = optim.Adam(
+        net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas, eps=FLAGS.eps)
 
     if FLAGS.resume:
         ckpt = torch.load(os.path.join(FLAGS.logdir, 'model.pt'))
@@ -184,8 +161,6 @@ def train():
         net_D.load_state_dict(ckpt['net_D'])
         optim_G.load_state_dict(ckpt['optim_G'])
         optim_D.load_state_dict(ckpt['optim_D'])
-        sched_G.load_state_dict(ckpt['sched_G'])
-        sched_D.load_state_dict(ckpt['sched_D'])
         ema_G.load_state_dict(ckpt['ema_G'])
         fixed_z = ckpt['fixed_z']
         fixed_y = ckpt['fixed_y']
@@ -298,10 +273,6 @@ def train():
                 decay = FLAGS.ema_decay
             ema(net_G, ema_G, decay)
 
-            # scheduler
-            sched_G.step()
-            sched_D.step()
-
             if step == 1 or step % FLAGS.sample_step == 0:
                 fake_imgs = []
                 with torch.no_grad():
@@ -319,8 +290,6 @@ def train():
                     'net_D': net_D.state_dict(),
                     'optim_G': optim_G.state_dict(),
                     'optim_D': optim_D.state_dict(),
-                    'sched_G': sched_G.state_dict(),
-                    'sched_D': sched_D.state_dict(),
                     'ema_G': ema_G.state_dict(),
                     'step': step,
                     'fixed_z': fixed_z,
@@ -333,10 +302,34 @@ def train():
                 else:
                     eval_net_G = net_G
                     eval_ema_G = ema_G
-                pbar.write('Evalutation')
-                evaluate(eval_net_G, writer, pbar, step)
-                pbar.write('Evalutation(ema)')
-                evaluate(eval_ema_G, writer_ema, pbar, step)
+                (net_G_IS, net_G_IS_std), net_G_FID = evaluate(eval_net_G)
+                (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(eval_ema_G)
+                pbar.write(
+                    "%6d/%6d "
+                    "IS: %5.3f(%.3f), FID: %6.3f, "
+                    "IS(EMA): %5.3f(%.3f), FID(EMA): %6.3f" % (
+                        step, FLAGS.total_steps,
+                        net_G_IS, net_G_IS_std, net_G_FID,
+                        ema_G_IS, ema_G_IS_std, ema_G_FID))
+                writer.add_scalar('IS', net_G_IS, step)
+                writer.add_scalar('IS_std', net_G_IS_std, step)
+                writer.add_scalar('FID', net_G_FID, step)
+                writer_ema.add_scalar('IS', ema_G_IS, step)
+                writer_ema.add_scalar('IS_std', ema_G_IS_std, step)
+                writer_ema.add_scalar('FID', ema_G_FID, step)
+                writer.flush()
+                with open(os.path.join(FLAGS.logdir, 'eval.txt'), 'a') as f:
+                    f.write(json.dumps(
+                        {
+                            'step': step,
+                            'IS': net_G_IS,
+                            'IS_std': net_G_IS_std,
+                            'FID': net_G_FID,
+                            'IS(EMA)': ema_G_IS,
+                            'IS_std(EMA)': ema_G_IS_std,
+                            'FID(EMA)': ema_G_FID
+                        }) + "\n"
+                    )
     writer.close()
 
 

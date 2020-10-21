@@ -11,45 +11,27 @@ from tqdm import trange
 device = torch.device('cuda:0')
 
 
-def generate_imgs(net_G, z_dim=128, num_images=50000, batch_size=128):
-    imgs = []
+def generate_images(net_G, z_dim=128, n_classes=None, num_images=10000,
+                    batch_size=64, verbose=False):
+    images_list = []
     with torch.no_grad():
-        for start in range(0, num_images, batch_size):
-            end = min(start + batch_size, num_images)
-            z = torch.randn(end - start, z_dim).to(device)
-            imgs.append(net_G(z).cpu().numpy())
-    imgs = np.concatenate(imgs, axis=0)
-    imgs = (imgs + 1) / 2
-    return imgs
-
-
-def generate_conditional_imgs(net_G, n_classes=10, z_dim=128, num_images=50000,
-                              batch_size=128):
-    imgs = []
-    with torch.no_grad():
-        for start in range(0, num_images, batch_size):
-            end = min(start + batch_size, num_images)
-            z = torch.randn(end - start, z_dim).to(device)
-            y = torch.randint(n_classes, size=(end - start,)).to(device)
-            imgs.append(net_G(z, y).cpu().numpy())
-    imgs = np.concatenate(imgs, axis=0)
-    imgs = (imgs + 1) / 2
-    return imgs
-
-
-def generate_and_save(net_G, output_dir, z_dim=128, num_images=50000,
-                      batch_size=128):
-    counter = 0
-    os.makedirs(output_dir)
-    with torch.no_grad():
-        for start in trange(0, num_images, batch_size, dynamic_ncols=True):
+        for start in trange(0, num_images, batch_size, disable=(not verbose)):
             batch_size = min(batch_size, num_images - start)
             z = torch.randn(batch_size, z_dim).to(device)
-            x = net_G(z).cpu()
-            x = (x + 1) / 2
-            for image in x:
-                save_image(image, os.path.join(output_dir, '%d.png' % counter))
-                counter += 1
+            if n_classes is not None:
+                y = torch.randint(n_classes, size=(batch_size,)).to(device)
+                images = net_G(z, y).cpu()
+            else:
+                images = net_G(z).cpu()
+            images_list.append(images.numpy())
+    images = np.concatenate(images_list, axis=0)
+    images = (images + 1) / 2
+    return images
+
+
+def save_images(images, output_dir):
+    for i, image in enumerate(images):
+        save_image(torch.tensor(image), os.path.join(output_dir, '%d.png' % i))
 
 
 def infiniteloop(dataloader):
