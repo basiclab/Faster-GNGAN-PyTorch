@@ -27,33 +27,7 @@ class Hinge(nn.Module):
             return loss
 
 
-class Wasserstein(nn.Module):
-    def forward(self, pred_real, pred_fake=None):
-        if pred_fake is not None:
-            loss_real = -pred_real.mean()
-            loss_fake = pred_fake.mean()
-            loss = loss_real + loss_fake
-            return loss, loss_real, loss_fake
-        else:
-            loss = -pred_real.mean()
-            return loss
-
-
-class Softplus(nn.Module):
-    def forward(self, pred_real, pred_fake=None):
-        if pred_fake is not None:
-            loss_real = F.softplus(-pred_real).mean()
-            loss_fake = F.softplus(pred_fake).mean()
-            loss = loss_real + loss_fake
-            return loss, loss_real, loss_fake
-        else:
-            loss = F.softplus(-pred_real).mean()
-            return loss
-
-
 loss_fns = {
     'bce': BCEWithLogits,
     'hinge': Hinge,
-    'was': Wasserstein,
-    'softplus': Softplus
 }

@@ -23,14 +23,12 @@ flags.DEFINE_bool('resume', False, 'resume from logdir')
 flags.DEFINE_enum('dataset', 'cifar10',
                   ['cifar10', 'imagenet128', 'imagenet128.hdf5'], "dataset")
 flags.DEFINE_enum('arch', 'res32', sn_cgan.generators.keys(), "architecture")
-flags.DEFINE_enum('norm', 'SN', ['GN', 'SN'], "normalization techniques")
+flags.DEFINE_enum('norm', 'GN', ['GN', 'SN'], "normalization techniques")
 flags.DEFINE_integer('n_classes', 10, 'the number of classes in dataset')
-flags.DEFINE_integer('total_steps', 100000, "total number of training steps")
+flags.DEFINE_integer('total_steps', 200000, "total number of training steps")
 flags.DEFINE_integer('lr_decay_start', 0, 'apply linearly decay to lr')
 flags.DEFINE_integer('batch_size', 64, "batch size")
 flags.DEFINE_integer('num_workers', 8, "dataloader workers")
-flags.DEFINE_integer('G_accumulation', 1, 'gradient accumulation for net_G')
-flags.DEFINE_integer('D_accumulation', 1, 'gradient accumulation for D')
 flags.DEFINE_float('G_lr', 2e-4, "Generator learning rate")
 flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
@@ -47,7 +45,7 @@ flags.DEFINE_bool('eval_use_torch', False, 'calculate IS and FID on gpu')
 flags.DEFINE_integer('eval_step', 5000, "evaluate FID and Inception Score")
 flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
 flags.DEFINE_integer('sample_size', 64, "sampling size of images")
-flags.DEFINE_string('logdir', './logs/SN-cGAN_CIFAR10_0', 'log folder')
+flags.DEFINE_string('logdir', './logs/GN-cGAN_CIFAR10_0', 'log folder')
 flags.DEFINE_string('fid_cache', './stats/cifar10_test.npz', 'FID cache')
 # generate sample
 flags.DEFINE_bool('generate', False, 'generate images')
@@ -187,56 +185,52 @@ def train():
     with trange(start, FLAGS.total_steps + 1, dynamic_ncols=True,
                 initial=start, total=FLAGS.total_steps) as pbar:
         for step in pbar:
-            loss_list = []
-            loss_real_list = []
-            loss_fake_list = []
+            loss_sum = 0
+            loss_real_sum = 0
+            loss_fake_sum = 0
 
             # Discriminator
             net_D.train()
             for _ in range(FLAGS.n_dis):
+                x_real, y_real = next(looper)
+                x_real, y_real = x_real.to(device), y_real.to(device)
+                z_rand.normal_()
+                y_rand.random_(FLAGS.n_classes)
+                pred_real, pred_fake = net_GD(
+                    z_rand[: FLAGS.batch_size],
+                    y_rand[: FLAGS.batch_size],
+                    x_real,
+                    y_real)
+                loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
                 optim_D.zero_grad()
-                for _ in range(FLAGS.D_accumulation):
-                    x_real, y_real = next(looper)
-                    x_real, y_real = x_real.to(device), y_real.to(device)
-                    z_rand.normal_()
-                    y_rand.random_(FLAGS.n_classes)
-                    pred_real, pred_fake = net_GD(
-                        z_rand[: FLAGS.batch_size],
-                        y_rand[: FLAGS.batch_size],
-                        x_real,
-                        y_real)
-                    loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
-                    loss = loss / float(FLAGS.D_accumulation)
-                    loss.backward()
-                    loss_list.append(loss.detach())
-                    loss_real_list.append(loss_real.detach())
-                    loss_fake_list.append(loss_fake.detach())
+                loss.backward()
                 optim_D.step()
 
-            loss = torch.mean(torch.stack(loss_list))
-            loss_real = torch.mean(torch.stack(loss_real_list))
-            loss_fake = torch.mean(torch.stack(loss_fake_list))
-            if FLAGS.loss == 'was':
-                loss = -loss
+                loss_sum += loss.cpu().item()
+                loss_real_sum += loss_real.cpu().item()
+                loss_fake_sum += loss_fake.cpu().item()
+
+            loss = loss_sum / FLAGS.n_dis
+            loss_real = loss_real_sum / FLAGS.n_dis
+            loss_fake = loss_fake_sum / FLAGS.n_dis
+
+            writer.add_scalar('loss', loss, step)
+            writer.add_scalar('loss_real', loss_real, step)
+            writer.add_scalar('loss_fake', loss_fake, step)
+
             pbar.set_postfix(
                 loss='%.4f' % loss,
                 loss_real='%.4f' % loss_real,
                 loss_fake='%.4f' % loss_fake)
 
-            writer.add_scalar('loss', loss.item(), step)
-            writer.add_scalar('loss_real', loss_real.item(), step)
-            writer.add_scalar('loss_fake', loss_fake.item(), step)
-
             # Generator
             net_G.train()
+            z_rand.normal_()
+            y_rand.random_(FLAGS.n_classes)
+            with module_no_grad(net_D):
+                loss = loss_fn(net_GD(z_rand, y_rand))
             optim_G.zero_grad()
-            for _ in range(FLAGS.G_accumulation):
-                z_rand.normal_()
-                y_rand.random_(FLAGS.n_classes)
-                with module_no_grad(net_D):
-                    loss = loss_fn(net_GD(z_rand, y_rand))
-                loss = loss / float(FLAGS.G_accumulation)
-                loss.backward()
+            loss.backward()
             optim_G.step()
 
             # ema

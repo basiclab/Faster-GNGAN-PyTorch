@@ -55,7 +55,8 @@ class ImageNetHDF5(Dataset):
             # labels_dset[...] = y
         with tqdm(dataloader, dynamic_ncols=True) as pbar:
             for i, (x, y) in enumerate(pbar):
-                x = (x * 255).byte().numpy()
+                x = (x + 1) / 2                 # [0., 1.]
+                x = (x * 255).byte().numpy()    # [0, 255]
                 y = y.numpy()
                 with h5.File(h5_path, 'a') as f:
                     f['imgs'].resize(
@@ -76,11 +77,11 @@ class ImageNetHDF5(Dataset):
             with h5.File(self.h5_path, 'r') as f:
                 image = f['imgs'][idx]
                 label = f['labels'][idx]
-        image = transforms.functional.to_pil_image(torch.tensor(image))
         if self.transform is not None:
+            image = transforms.functional.to_pil_image(torch.tensor(image))
             image = self.transform(image)
         else:
-            image = transforms.functional.to_tensor(image)
+            image = torch.tensor(image).float() * 2 - 1
         return image, label
 
 
@@ -130,21 +131,16 @@ def get_dataset(name):
             ]))
     if name == 'imagenet128.hdf5':
         return ImageNetHDF5(
-            './data/ILSVRC2012/train', size=128, in_memory=True,
-            transform=transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]))
+            './data/imagenet/train', size=128, in_memory=True)
 
 
 if __name__ == "__main__":
     dataset = ImageNetHDF5(
-        './data/ILSVRC2012/train', size=128, in_memory=False, cache='./',
-        transform=transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-        ]))
+        './data/imagenet/train', size=128, in_memory=False, cache='./')
     print(len(dataset))
     image, label = dataset[0]
     print('image', image.shape, image.dtype, image.min(), image.max())
     print('label', label.shape, label.dtype)
+
+    from torchvision.utils import save_image
+    save_image((image + 1) / 2, 'test.png')

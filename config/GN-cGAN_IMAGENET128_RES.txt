@@ -4,6 +4,7 @@
 --D_lr=0.0002
 --ema_start=20000
 --eval_step=2000
+--eval_use_torch
 --fid_cache=./stats/imagenet128_train.npz
 --G_lr=0.0002
 --logdir=./logs/GN-cGAN_IMAGENET128_RES_0

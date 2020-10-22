@@ -180,31 +180,6 @@ class ResGenerator48(nn.Module):
         return self.blocks(inputs)
 
 
-class ResGenerator128(nn.Module):
-    def __init__(self, z_dim):
-        super().__init__()
-        self.z_dim = z_dim
-        self.linear = nn.Linear(z_dim, 4 * 4 * 1024)
-
-        self.blocks = nn.Sequential(
-            ResGenBlock(1024, 1024),
-            ResGenBlock(1024, 512),
-            ResGenBlock(512, 256),
-            ResGenBlock(256, 128),
-            ResGenBlock(128, 64),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.Conv2d(64, 3, 3, stride=1, padding=1),
-            nn.Tanh(),
-        )
-        weights_init(self)
-
-    def forward(self, z):
-        inputs = self.linear(z)
-        inputs = inputs.view(-1, 1024, 4, 4)
-        return self.blocks(inputs)
-
-
 class OptimizedResDisblock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
@@ -286,28 +261,6 @@ class ResDiscriminator48(nn.Module):
         return x
 
 
-class ResDiscriminator128(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.model = nn.Sequential(
-            OptimizedResDisblock(3, 64),
-            ResDisBlock(64, 128, down=True),
-            ResDisBlock(128, 256, down=True),
-            ResDisBlock(256, 512, down=True),
-            ResDisBlock(512, 1024, down=True),
-            ResDisBlock(1024, 1024),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d((1, 1)))
-        self.linear = nn.Linear(1024, 1)
-        weights_init(self)
-
-    def forward(self, x):
-        x = self.model(x)
-        x = torch.flatten(x, start_dim=1)
-        x = self.linear(x)
-        return x
-
-
 class GenDis(nn.Module):
     """
     Speed up training by paralleling generator and discriminator together
@@ -345,7 +298,6 @@ generators = {
     'cnn48': Generator48,
     'res32': ResGenerator32,
     'res48': ResGenerator48,
-    'res128': ResGenerator128,
 }
 
 discriminators = {
@@ -353,5 +305,4 @@ discriminators = {
     'cnn48': Discriminator48,
     'res32': ResDiscriminator32,
     'res48': ResDiscriminator48,
-    'res128': ResDiscriminator128,
 }
