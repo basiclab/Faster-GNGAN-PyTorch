@@ -1,6 +1,6 @@
 --arch=res128_concat
 --batch_size=16
---dataset=imagenet128
+--dataset=imagenet128.hdf5
 --D_lr=0.0002
 --ema_start=20000
 --eval_step=2000
@@ -13,6 +13,7 @@
 --n_dis=5
 --norm=GN
 --num_images=10000
+--num_workers=1
 --sample_size=64
 --sample_step=500
 --seed=0

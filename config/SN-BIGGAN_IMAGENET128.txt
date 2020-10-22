@@ -20,6 +20,7 @@
 --n_dis=1
 --norm=SN
 --num_images=10000
+--num_workers=1
 --sample_size=64
 --sample_step=500
 --seed=0

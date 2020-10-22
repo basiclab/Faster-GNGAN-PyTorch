@@ -79,7 +79,6 @@ def evaluate(net_G):
     images = generate_images(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
-        n_classes=FLAGS.n_classes,
         num_images=FLAGS.num_images,
         batch_size=FLAGS.batch_size,
         verbose=False)
