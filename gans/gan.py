@@ -271,7 +271,7 @@ def train():
                 (net_G_IS, net_G_IS_std), net_G_FID = evaluate(eval_net_G)
                 pbar.write(
                     "%6d/%6d "
-                    "IS: %5.3f(%.3f), FID: %6.3f" % (
+                    "IS: %6.3f(%.3f), FID: %7.3f" % (
                         step, FLAGS.total_steps,
                         net_G_IS, net_G_IS_std, net_G_FID))
                 writer.add_scalar('IS', net_G_IS, step)

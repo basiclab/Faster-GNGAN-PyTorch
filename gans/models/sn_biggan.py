@@ -51,7 +51,6 @@ class ConditionalBatchNorm2d(nn.Module):
             self.bias = nn.Embedding(cond_size, in_channel)
         self.register_buffer('stored_mean', torch.zeros(in_channel))
         self.register_buffer('stored_var',  torch.ones(in_channel))
-        # self.batchnorm = nn.BatchNorm2d(in_channel, affine=False)
 
     def forward(self, x, y):
         gain = self.gain(y).view(y.size(0), -1, 1, 1) + 1
@@ -71,28 +70,26 @@ class GenBlock(nn.Module):
         """
         super().__init__()
 
-        self.shorcut = nn.Sequential(
-            nn.Upsample(scale_factor=2),
-            sn(nn.Conv2d(in_channels, out_channels, 1, padding=0)))
-
         # residual
         self.bn1 = ConditionalBatchNorm2d(in_channels, cbn_in_dim, cbn_linear)
-        self.activation = nn.ReLU(inplace=True)
-        self.upsample = nn.Upsample(scale_factor=2)
-        self.conv1 = sn(nn.Conv2d(in_channels, out_channels, 3, padding=1))
+        self.residual1 = nn.Sequential(
+            nn.ReLU(inplace=True),
+            nn.Upsample(scale_factor=2),
+            nn.Conv2d(in_channels, out_channels, 3, stride=1, padding=1))
         self.bn2 = ConditionalBatchNorm2d(out_channels, cbn_in_dim, cbn_linear)
-        self.conv2 = sn(nn.Conv2d(out_channels, out_channels, 3, padding=1))
+        self.residual2 = nn.Sequential(
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1))
+
+        # shortcut
+        self.shortcut = nn.Sequential(
+            nn.Upsample(scale_factor=2),
+            nn.Conv2d(in_channels, out_channels, 1, stride=1, padding=0))
 
     def forward(self, x, y):
-        # residual
-        h = self.activation(self.bn1(x, y))
-        h = self.upsample(h)
-        h = self.conv1(h)
-        h = self.activation(self.bn2(h, y))
-        h = self.conv2(h)
-        # shorcut
-        x = self.shorcut(x)
-        return h + x
+        h = self.residual1(self.bn1(x, y))
+        h = self.residual2(self.bn2(h, y))
+        return h + self.shortcut(x)
 
 
 class Generator32(nn.Module):
@@ -170,11 +167,9 @@ class Generator128(nn.Module):
 class OptimizedDisblock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        # shortcut
         self.shortcut = nn.Sequential(
             nn.AvgPool2d(2),
             sn(nn.Conv2d(in_channels, out_channels, 1, padding=0)))
-        # residual
         self.residual = nn.Sequential(
             sn(nn.Conv2d(in_channels, out_channels, 3, padding=1)),
             nn.ReLU(inplace=True),
@@ -289,7 +284,8 @@ class GenDis(nn.Module):
 def weights_init(m):
     for module in m.modules():
         if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
-            torch.nn.init.normal_(module.weight, 0, 0.02)
+            # torch.nn.init.normal_(module.weight, 0, 0.02)
+            torch.nn.init.orthogonal_(module.weight)
 
 
 generators = {

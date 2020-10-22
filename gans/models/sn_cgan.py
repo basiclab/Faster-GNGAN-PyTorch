@@ -22,7 +22,7 @@ class ConditionalBatchNorm2d(nn.Module):
         return x * gain + bias
 
 
-class ResGenBlock(nn.Module):
+class GenBlock(nn.Module):
     def __init__(self, in_channels, out_channels, n_classes):
         super().__init__()
 
@@ -54,9 +54,9 @@ class ResGenerator32(nn.Module):
         self.linear = nn.Linear(z_dim, 4 * 4 * 256)
 
         self.blocks = nn.ModuleList([
-            ResGenBlock(256, 256, n_classes),
-            ResGenBlock(256, 256, n_classes),
-            ResGenBlock(256, 256, n_classes),
+            GenBlock(256, 256, n_classes),
+            GenBlock(256, 256, n_classes),
+            GenBlock(256, 256, n_classes),
         ])
         self.output = nn.Sequential(
             nn.BatchNorm2d(256),
@@ -80,11 +80,11 @@ class ResGenerator128(nn.Module):
         self.linear = nn.Linear(z_dim, 4 * 4 * 1024)
 
         self.blocks = nn.ModuleList([
-            ResGenBlock(1024, 1024, n_classes),
-            ResGenBlock(1024, 512, n_classes),
-            ResGenBlock(512, 256, n_classes),
-            ResGenBlock(256, 128, n_classes),
-            ResGenBlock(128, 64, n_classes),
+            GenBlock(1024, 1024, n_classes),
+            GenBlock(1024, 512, n_classes),
+            GenBlock(512, 256, n_classes),
+            GenBlock(256, 128, n_classes),
+            GenBlock(128, 64, n_classes),
         ])
         self.output = nn.Sequential(
             nn.BatchNorm2d(64),
@@ -102,7 +102,7 @@ class ResGenerator128(nn.Module):
         return self.output(inputs)
 
 
-class OptimizedResDisblock(nn.Module):
+class OptimizedDisblock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.shortcut = nn.Sequential(
@@ -118,7 +118,7 @@ class OptimizedResDisblock(nn.Module):
         return self.residual(x) + self.shortcut(x)
 
 
-class ResDisBlock(nn.Module):
+class DisBlock(nn.Module):
     def __init__(self, in_channels, out_channels, down=False):
         super().__init__()
         shortcut = []
@@ -147,11 +147,11 @@ class ResDiscriminator32(nn.Module):
     def __init__(self, n_classes):
         super().__init__()
         self.main = nn.Sequential(
-            OptimizedResDisblock(3, 128),
-            ResDisBlock(128, 128, down=True),
-            ResDisBlock(128, 128),
-            ResDisBlock(128, 128),
-            nn.ReLU())
+            OptimizedDisblock(3, 128),
+            DisBlock(128, 128, down=True),
+            DisBlock(128, 128),
+            DisBlock(128, 128),
+            nn.ReLU(inplace=True))
         self.linear = spectral_norm(nn.Linear(128, 1, bias=False))
         self.embedding = spectral_norm(nn.Embedding(n_classes, 128))
         weights_init(self)
@@ -166,14 +166,14 @@ class ResConcatDiscriminator128(nn.Module):
     def __init__(self, n_classes):
         super().__init__()
         self.main1 = nn.Sequential(
-            OptimizedResDisblock(3, 64),
-            ResDisBlock(64, 128, down=True),
-            ResDisBlock(128, 256, down=True))
+            OptimizedDisblock(3, 64),
+            DisBlock(64, 128, down=True),
+            DisBlock(128, 256, down=True))
         self.embed = spectral_norm(nn.Embedding(n_classes, 128))
         self.main2 = nn.Sequential(
-            ResDisBlock(256 + 128, 512, down=True),
-            ResDisBlock(512, 1024, down=True),
-            ResDisBlock(1024, 1024),
+            DisBlock(256 + 128, 512, down=True),
+            DisBlock(512, 1024, down=True),
+            DisBlock(1024, 1024),
             nn.ReLU(inplace=True))
         self.linear = spectral_norm(nn.Linear(1024, 1))
         weights_init(self)
@@ -191,12 +191,12 @@ class ResPorjectDiscriminator128(nn.Module):
     def __init__(self, n_classes):
         super().__init__()
         self.main = nn.Sequential(
-            OptimizedResDisblock(3, 64),
-            ResDisBlock(64, 128, down=True),
-            ResDisBlock(128, 256, down=True),
-            ResDisBlock(256, 512, down=True),
-            ResDisBlock(512, 1024, down=True),
-            ResDisBlock(1024, 1024),
+            OptimizedDisblock(3, 64),
+            DisBlock(64, 128, down=True),
+            DisBlock(128, 256, down=True),
+            DisBlock(256, 512, down=True),
+            DisBlock(512, 1024, down=True),
+            DisBlock(1024, 1024),
             nn.ReLU(inplace=True))
         self.embed = spectral_norm(nn.Embedding(n_classes, 1024))
         self.linear = spectral_norm(nn.Linear(1024, 1))
