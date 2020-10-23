@@ -107,7 +107,7 @@ class Generator32(nn.Module):
             nn.ReLU(inplace=True),
             sn(nn.Conv2d(ch * 4, 3, 3, padding=1)),      # 3 x 32 x 32
             nn.Tanh())
-        weights_init(self)
+        res32_weights_init(self)
 
     def forward(self, z, y):
         h = self.linear(z).view(z.size(0), -1, 4, 4)
@@ -145,7 +145,7 @@ class Generator128(nn.Module):
             nn.ReLU(inplace=True),
             sn(nn.Conv2d(ch * 1, 3, 3, padding=1)),  # 3 x 128 x 128
             nn.Tanh())
-        weights_init(self)
+        res128_weights_init(self)
 
     def forward(self, z, y):
         y = self.shared_embedding(y)
@@ -219,7 +219,7 @@ class Discriminator32(nn.Module):
 
         self.linear = sn(nn.Linear(ch * 4, 1))
         self.embedding = sn(nn.Embedding(n_classes, ch * 4))
-        weights_init(self)
+        res32_weights_init(self)
 
     def forward(self, x, y):
         h = self.blocks(x).sum(dim=[2, 3])
@@ -244,7 +244,7 @@ class Discriminator128(nn.Module):
 
         self.linear = sn(nn.Linear(ch * 16, 1))
         self.embedding = sn(nn.Embedding(n_classes, ch * 16))
-        weights_init(self)
+        res128_weights_init(self)
 
     def forward(self, x, y):
         h = self.blocks(x).sum(dim=[2, 3])
@@ -281,10 +281,15 @@ class GenDis(nn.Module):
             return net_D_fake
 
 
-def weights_init(m):
+def res32_weights_init(m):
     for module in m.modules():
         if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
-            # torch.nn.init.normal_(module.weight, 0, 0.02)
+            torch.nn.init.normal_(module.weight, std=0.02)
+
+
+def res128_weights_init(m):
+    for module in m.modules():
+        if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
             torch.nn.init.orthogonal_(module.weight)
 
 

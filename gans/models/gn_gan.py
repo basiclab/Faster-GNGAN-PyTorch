@@ -48,7 +48,7 @@ class Generator(nn.Module):
             nn.ReLU(True),
             nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1),
             nn.Tanh())
-        weights_init(self, 'normal')
+        cnn_weights_init(self)
 
     def forward(self, z):
         x = self.linear(z)
@@ -83,7 +83,7 @@ class Discriminator(nn.Module):
             nn.LeakyReLU(0.1, inplace=True))
 
         self.linear = nn.Linear(M // 8 * M // 8 * 512, 1)
-        weights_init(self, 'normal')
+        cnn_weights_init(self)
 
     def forward(self, x):
         x = self.main(x)
@@ -148,7 +148,7 @@ class ResGenerator32(nn.Module):
             nn.Conv2d(256, 3, 3, stride=1, padding=1),
             nn.Tanh(),
         )
-        weights_init(self)
+        res_weights_init(self)
 
     def forward(self, z):
         inputs = self.linear(z)
@@ -171,7 +171,7 @@ class ResGenerator48(nn.Module):
             nn.Conv2d(64, 3, 3, stride=1, padding=1),
             nn.Tanh(),
         )
-        weights_init(self)
+        res_weights_init(self)
 
     def forward(self, z):
         inputs = self.linear(z)
@@ -231,7 +231,7 @@ class ResDiscriminator32(nn.Module):
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 1)))
         self.linear = nn.Linear(128, 1)
-        weights_init(self)
+        res_weights_init(self)
 
     def forward(self, x):
         x = self.model(x)
@@ -251,7 +251,7 @@ class ResDiscriminator48(nn.Module):
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 1)))
         self.linear = nn.Linear(512, 1)
-        weights_init(self)
+        res_weights_init(self)
 
     def forward(self, x):
         x = self.model(x)
@@ -284,18 +284,20 @@ class GenDis(nn.Module):
             return net_D_fake
 
 
-def weights_init(m, method='kaiming_normal'):
-    assert(method in ['kaiming_normal', 'xavier_normal', 'normal'])
+def res_weights_init(m):
     for module in m.modules():
         if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
-            if method == 'kaiming_normal':
-                torch.nn.init.kaiming_normal_(module.weight.data)
-            if method == 'xavier_normal':
-                torch.nn.init.xavier_normal_(module.weight.data)
-            if method == 'normal':
-                torch.nn.init.normal_(module.weight.data, std=0.02)
+            torch.nn.init.kaiming_normal_(module.weight)
             if module.bias is not None:
-                torch.nn.init.zeros_(module.bias.data)
+                torch.nn.init.zeros_(module.bias)
+
+
+def cnn_weights_init(model):
+    for name, module in model.named_modules():
+        if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+            torch.nn.init.normal_(module.weight, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
 
 
 generators = {
