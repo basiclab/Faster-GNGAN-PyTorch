@@ -204,12 +204,10 @@ def train():
     with trange(start, FLAGS.total_steps + 1, dynamic_ncols=True,
                 initial=start, total=FLAGS.total_steps) as pbar:
         for step in pbar:
-            loss_list = []
-            loss_real_list = []
-            loss_fake_list = []
-
-            if FLAGS.cr > 0:
-                loss_cr_list = []
+            loss_sum = 0
+            loss_real_sum = 0
+            loss_fake_sum = 0
+            loss_cr_sum = 0
 
             # Discriminator
             net_D.train()
@@ -223,36 +221,34 @@ def train():
                     pred_real, pred_fake = net_GD(
                         z_rand, y_rand, x_real, y_real)
                     loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
-                    loss_all = loss
                     if FLAGS.cr > 0:
-                        loss_cr = consistency_loss(
-                            net_D, x_real, y_real, pred_real)
-                        loss_all = loss_all + FLAGS.cr * loss_cr
-                        loss_cr_list.append(loss_cr.detach().cpu())
+                        loss_cr = consistency_loss(net_D, real, pred_real)
+                    else:
+                        loss_cr = torch.tensor(0.)
+                    loss_all = loss + FLAGS.cr * loss_cr
                     loss_all = loss_all / float(FLAGS.D_accumulation)
                     loss_all.backward()
-                    loss_list.append(loss.detach().cpu())
-                    loss_real_list.append(loss_real.detach().cpu())
-                    loss_fake_list.append(loss_fake.detach().cpu())
+
+                    loss_sum += loss.cpu().item()
+                    loss_real_sum += loss_real.cpu().item()
+                    loss_fake_sum += loss_fake.cpu().item()
+                    loss_cr_sum += loss_cr.cpu().item()
                 optim_D.step()
 
-            loss = torch.mean(torch.stack(loss_list))
-            loss_real = torch.mean(torch.stack(loss_real_list))
-            loss_fake = torch.mean(torch.stack(loss_fake_list))
-            if FLAGS.cr > 0:
-                loss_cr = torch.mean(torch.stack(loss_cr_list))
-            if FLAGS.loss == 'was':
-                loss = -loss
+            loss = loss_sum / FLAGS.n_dis / FLAGS.D_accumulation
+            loss_real = loss_real_sum / FLAGS.n_dis / FLAGS.D_accumulation
+            loss_fake = loss_fake_sum / FLAGS.n_dis / FLAGS.D_accumulation
+            loss_cr = loss_cr_sum / FLAGS.n_dis / FLAGS.D_accumulation
+
+            writer.add_scalar('loss', loss, step)
+            writer.add_scalar('loss_real', loss_real, step)
+            writer.add_scalar('loss_fake', loss_fake, step)
+            writer.add_scalar('loss_cr', loss_cr, step)
+
             pbar.set_postfix(
                 loss='%.4f' % loss,
                 loss_real='%.4f' % loss_real,
                 loss_fake='%.4f' % loss_fake)
-
-            writer.add_scalar('loss', loss.item(), step)
-            writer.add_scalar('loss_real', loss_real.item(), step)
-            writer.add_scalar('loss_fake', loss_fake.item(), step)
-            if FLAGS.cr > 0:
-                writer.add_scalar('loss_cr', loss_cr.item(), step)
 
             # Generator
             net_G.train()
