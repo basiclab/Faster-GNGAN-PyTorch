@@ -17,7 +17,7 @@
 --n_classes=10
 --n_dis=4
 --norm=SN
---num_images=10000
+--num_images=50000
 --sample_size=64
 --sample_step=500
 --seed=0

@@ -7,8 +7,7 @@ def grad_norm(net_D, *args, **kwargs):
         x.requires_grad_(True)
     fx = net_D(*args, **kwargs)
     grads = torch.autograd.grad(
-        fx, args, torch.ones_like(fx), create_graph=True,
-        retain_graph=True)
+        fx, args, torch.ones_like(fx), create_graph=True, retain_graph=True)
     grad_norms = []
     for grad in grads:
         grad_norm = (torch.flatten(grad, start_dim=1) ** 2).sum(1)
@@ -49,7 +48,7 @@ class Generator(nn.Module):
             nn.ReLU(True),
             nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1),
             nn.Tanh())
-        weights_init(self)
+        weights_init(self, 'normal')
 
     def forward(self, z):
         x = self.linear(z)
@@ -84,7 +83,7 @@ class Discriminator(nn.Module):
             nn.LeakyReLU(0.1, inplace=True))
 
         self.linear = nn.Linear(M // 8 * M // 8 * 512, 1)
-        weights_init(self)
+        weights_init(self, 'normal')
 
     def forward(self, x):
         x = self.main(x)
@@ -113,7 +112,7 @@ class Discriminator48(Discriminator):
         super().__init__(M=48)
 
 
-class ResGenBlock(nn.Module):
+class GenBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.residual = nn.Sequential(
@@ -141,9 +140,9 @@ class ResGenerator32(nn.Module):
         self.linear = nn.Linear(z_dim, 4 * 4 * 256)
 
         self.blocks = nn.Sequential(
-            ResGenBlock(256, 256),
-            ResGenBlock(256, 256),
-            ResGenBlock(256, 256),
+            GenBlock(256, 256),
+            GenBlock(256, 256),
+            GenBlock(256, 256),
             nn.BatchNorm2d(256),
             nn.ReLU(),
             nn.Conv2d(256, 3, 3, stride=1, padding=1),
@@ -164,9 +163,9 @@ class ResGenerator48(nn.Module):
         self.linear = nn.Linear(z_dim, 6 * 6 * 512)
 
         self.blocks = nn.Sequential(
-            ResGenBlock(512, 256),
-            ResGenBlock(256, 128),
-            ResGenBlock(128, 64),
+            GenBlock(512, 256),
+            GenBlock(256, 128),
+            GenBlock(128, 64),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.Conv2d(64, 3, 3, stride=1, padding=1),
@@ -187,11 +186,11 @@ class ResGenerator128(nn.Module):
         self.linear = nn.Linear(z_dim, 4 * 4 * 1024)
 
         self.blocks = nn.Sequential(
-            ResGenBlock(1024, 1024),
-            ResGenBlock(1024, 512),
-            ResGenBlock(512, 256),
-            ResGenBlock(256, 128),
-            ResGenBlock(128, 64),
+            GenBlock(1024, 1024),
+            GenBlock(1024, 512),
+            GenBlock(512, 256),
+            GenBlock(256, 128),
+            GenBlock(128, 64),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.Conv2d(64, 3, 3, stride=1, padding=1),
@@ -221,7 +220,7 @@ class OptimizedResDisblock(nn.Module):
         return self.residual(x) + self.shortcut(x)
 
 
-class ResDisBlock(nn.Module):
+class DisBlock(nn.Module):
     def __init__(self, in_channels, out_channels, down=False):
         super().__init__()
         shortcut = []
@@ -251,9 +250,9 @@ class ResDiscriminator32(nn.Module):
         super().__init__()
         self.model = nn.Sequential(
             OptimizedResDisblock(3, 128),
-            ResDisBlock(128, 128, down=True),
-            ResDisBlock(128, 128),
-            ResDisBlock(128, 128),
+            DisBlock(128, 128, down=True),
+            DisBlock(128, 128),
+            DisBlock(128, 128),
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 1)))
         self.linear = nn.Linear(128, 1)
@@ -271,9 +270,9 @@ class ResDiscriminator48(nn.Module):
         super().__init__()
         self.model = nn.Sequential(
             OptimizedResDisblock(3, 64),
-            ResDisBlock(64, 128, down=True),
-            ResDisBlock(128, 256, down=True),
-            ResDisBlock(256, 512, down=True),
+            DisBlock(64, 128, down=True),
+            DisBlock(128, 256, down=True),
+            DisBlock(256, 512, down=True),
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 1)))
         self.linear = nn.Linear(512, 1)
@@ -291,11 +290,11 @@ class ResDiscriminator128(nn.Module):
         super().__init__()
         self.model = nn.Sequential(
             OptimizedResDisblock(3, 64),
-            ResDisBlock(64, 128, down=True),
-            ResDisBlock(128, 256, down=True),
-            ResDisBlock(256, 512, down=True),
-            ResDisBlock(512, 1024, down=True),
-            ResDisBlock(1024, 1024),
+            DisBlock(64, 128, down=True),
+            DisBlock(128, 256, down=True),
+            DisBlock(256, 512, down=True),
+            DisBlock(512, 1024, down=True),
+            DisBlock(1024, 1024),
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 1)))
         self.linear = nn.Linear(1024, 1)
@@ -332,10 +331,16 @@ class GenDis(nn.Module):
             return net_D_fake
 
 
-def weights_init(m):
+def weights_init(m, method='kaiming_normal'):
+    assert(method in ['kaiming_normal', 'xavier_normal', 'normal'])
     for module in m.modules():
         if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
-            torch.nn.init.kaiming_normal_(module.weight.data)
+            if method == 'kaiming_normal':
+                torch.nn.init.kaiming_normal_(module.weight.data)
+            if method == 'xavier_normal':
+                torch.nn.init.xavier_normal_(module.weight.data)
+            if method == 'normal':
+                torch.nn.init.normal_(module.weight.data, std=0.02)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias.data)
 

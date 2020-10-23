@@ -30,6 +30,7 @@ def generate_images(net_G, z_dim=128, n_classes=None, num_images=10000,
 
 
 def save_images(images, output_dir):
+    os.makedirs(output_dir, exist_ok=True)
     for i, image in enumerate(images):
         save_image(torch.tensor(image), os.path.join(output_dir, '%d.png' % i))
 

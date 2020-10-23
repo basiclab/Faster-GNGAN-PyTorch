@@ -21,12 +21,10 @@ FLAGS = flags.FLAGS
 # resume
 flags.DEFINE_bool('resume', False, 'resume from logdir')
 # model and training
-flags.DEFINE_enum(
-    'dataset', 'cifar10',
-    ['cifar10', 'stl10', 'imagenet128', 'imagenet128.hdf5'], "select dataset")
+flags.DEFINE_enum('dataset', 'cifar10', ['cifar10', 'stl10'], "select dataset")
 flags.DEFINE_enum('arch', 'res32', gn_gan.generators.keys(), "architecture")
 flags.DEFINE_enum('norm', 'GN', ['GN', 'SN'], "normalization techniques")
-flags.DEFINE_integer('total_steps', 100000, "total number of training steps")
+flags.DEFINE_integer('total_steps', 200000, "total number of training steps")
 flags.DEFINE_integer('lr_decay_start', 0, 'apply linearly decay to lr')
 flags.DEFINE_integer('batch_size', 64, "batch size")
 flags.DEFINE_integer('num_workers', 8, "dataloader workers")
@@ -36,7 +34,6 @@ flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
 flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
-flags.DEFINE_bool('parallel', False, 'multi-gpu training')
 flags.DEFINE_float('cr', 0, "weight for consistency regularization")
 flags.DEFINE_integer('seed', 0, "random seed")
 # logging
@@ -48,23 +45,21 @@ flags.DEFINE_string('logdir', './logs/GN-GAN_CIFAR10_RES_0', 'log folder')
 flags.DEFINE_string('fid_cache', './stats/cifar10_test.npz', 'FID cache')
 # generate
 flags.DEFINE_bool('generate', False, 'generate images')
-flags.DEFINE_string('pretrain', None, 'path to test model')
-flags.DEFINE_string('output', './outputs', 'path to output dir')
-flags.DEFINE_integer('num_images', 10000, 'the number of generated images')
+flags.DEFINE_string('output_dir', './outputs', 'path to output dir')
+flags.DEFINE_integer('num_images', 50000, 'the number of generated images')
 
 device = torch.device('cuda:0')
 
 
 def generate():
-    assert FLAGS.pretrain is not None, "set model weight by --pretrain [model]"
-
     if FLAGS.norm == 'GN':
         Generator = gn_gan.generators[FLAGS.arch]
         net_G = Generator(FLAGS.z_dim).to(device)
     if FLAGS.norm == 'SN':
         Generator = sn_gan.generators[FLAGS.arch]
         net_G = Generator(FLAGS.z_dim).to(device)
-    net_G.load_state_dict(torch.load(FLAGS.pretrain)['net_G'])
+    net_G.load_state_dict(
+        torch.load(os.path.join(FLAGS.logdir, 'model.pt'))['net_G'])
 
     images = generate_images(
         net_G=net_G,
@@ -73,6 +68,9 @@ def generate():
         batch_size=FLAGS.batch_size,
         verbose=True)
     save_images(images=images, output_dir=FLAGS.output_dir)
+    (IS, IS_std), FID = get_inception_and_fid_score(
+        images, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch, verbose=True)
+    print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
 
 
 def evaluate(net_G):
@@ -83,8 +81,7 @@ def evaluate(net_G):
         batch_size=FLAGS.batch_size,
         verbose=False)
     (IS, IS_std), FID = get_inception_and_fid_score(
-        images, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch,
-        parallel=FLAGS.parallel)
+        images, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch)
     del images
     return (IS, IS_std), FID
 
@@ -127,9 +124,6 @@ def train():
         net_G = Generator(FLAGS.z_dim).to(device)
         net_D = Discriminator().to(device)
         net_GD = sn_gan.GenDis(net_G, net_D)
-
-    if FLAGS.parallel:
-        net_GD = torch.nn.DataParallel(net_GD)
 
     # loss
     loss_fn = loss_fns[FLAGS.loss]()
@@ -183,57 +177,55 @@ def train():
     with trange(start, FLAGS.total_steps + 1, dynamic_ncols=True,
                 initial=start, total=FLAGS.total_steps) as pbar:
         for step in pbar:
-            loss_list = []
-            loss_real_list = []
-            loss_fake_list = []
-
-            if FLAGS.cr > 0:
-                loss_cr_list = []
+            loss_sum = 0
+            loss_real_sum = 0
+            loss_fake_sum = 0
+            loss_cr_sum = 0
 
             # Discriminator
             net_D.train()
             for _ in range(FLAGS.n_dis):
-                optim_D.zero_grad()
                 real, _ = next(looper)
                 real = real.to(device)
                 z.normal_()
                 pred_real, pred_fake = net_GD(z[: FLAGS.batch_size], real)
                 loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
-                loss_all = loss
                 if FLAGS.cr > 0:
                     loss_cr = consistency_loss(net_D, real, pred_real)
-                    loss_all += FLAGS.cr * loss_cr
-                    loss_cr_list.append(loss_cr.detach())
+                else:
+                    loss_cr = torch.tensor(0.)
+                loss_all = loss + FLAGS.cr * loss_cr
+
+                optim_D.zero_grad()
                 loss_all.backward()
-                loss_list.append(loss.detach())
-                loss_real_list.append(loss_real.detach())
-                loss_fake_list.append(loss_fake.detach())
                 optim_D.step()
 
-            loss = torch.mean(torch.stack(loss_list))
-            loss_real = torch.mean(torch.stack(loss_real_list))
-            loss_fake = torch.mean(torch.stack(loss_fake_list))
-            if FLAGS.cr > 0:
-                loss_cr = torch.mean(torch.stack(loss_cr_list))
-            if FLAGS.loss == 'was':
-                loss = -loss
+                loss_sum += loss.cpu().item()
+                loss_real_sum += loss_real.cpu().item()
+                loss_fake_sum += loss_fake.cpu().item()
+                loss_cr_sum += loss_cr.cpu().item()
+
+            loss = loss_sum / FLAGS.n_dis
+            loss_real = loss_real_sum / FLAGS.n_dis
+            loss_fake = loss_fake_sum / FLAGS.n_dis
+            loss_cr = loss_cr_sum / FLAGS.n_dis
+
+            writer.add_scalar('loss', loss, step)
+            writer.add_scalar('loss_real', loss_real, step)
+            writer.add_scalar('loss_fake', loss_fake, step)
+            writer.add_scalar('loss_cr', loss_cr, step)
+
             pbar.set_postfix(
                 loss='%.4f' % loss,
                 loss_real='%.4f' % loss_real,
                 loss_fake='%.4f' % loss_fake)
 
-            writer.add_scalar('loss', loss.item(), step)
-            writer.add_scalar('loss_real', loss_real.item(), step)
-            writer.add_scalar('loss_fake', loss_fake.item(), step)
-            if FLAGS.cr > 0:
-                writer.add_scalar('loss_cr', loss_cr.item(), step)
-
             # Generator
             net_G.train()
-            optim_G.zero_grad()
             z.normal_()
             with module_no_grad(net_D):
                 loss = loss_fn(net_GD(z))
+            optim_G.zero_grad()
             loss.backward()
             optim_G.step()
 
@@ -241,6 +233,7 @@ def train():
             sched_G.step()
             sched_D.step()
 
+            # sample from fixed z
             if step == 1 or step % FLAGS.sample_step == 0:
                 fake_imgs = []
                 with torch.no_grad():
@@ -252,6 +245,7 @@ def train():
                 save_image(grid, os.path.join(
                     FLAGS.logdir, 'sample', '%d.png' % step))
 
+            # evaluate IS, FID and save model
             if step == 1 or step % FLAGS.eval_step == 0:
                 ckpt = {
                     'net_G': net_G.state_dict(),
@@ -264,27 +258,23 @@ def train():
                     'fixed_z': fixed_z,
                 }
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
-                if FLAGS.parallel:
-                    eval_net_G = torch.nn.DataParallel(net_G)
-                else:
-                    eval_net_G = net_G
-                (net_G_IS, net_G_IS_std), net_G_FID = evaluate(eval_net_G)
+                (IS, IS_std), FID = evaluate(net_G)
                 pbar.write(
                     "%6d/%6d "
                     "IS: %6.3f(%.3f), FID: %7.3f" % (
                         step, FLAGS.total_steps,
-                        net_G_IS, net_G_IS_std, net_G_FID))
-                writer.add_scalar('IS', net_G_IS, step)
-                writer.add_scalar('IS_std', net_G_IS_std, step)
-                writer.add_scalar('FID', net_G_FID, step)
+                        IS, IS_std, FID))
+                writer.add_scalar('IS', IS, step)
+                writer.add_scalar('IS_std', IS_std, step)
+                writer.add_scalar('FID', FID, step)
                 writer.flush()
                 with open(os.path.join(FLAGS.logdir, 'eval.txt'), 'a') as f:
                     f.write(json.dumps(
                         {
                             'step': step,
-                            'IS': net_G_IS,
-                            'IS_std': net_G_IS_std,
-                            'FID': net_G_FID,
+                            'IS': IS,
+                            'IS_std': IS_std,
+                            'FID': FID,
                         }) + "\n"
                     )
     writer.close()
