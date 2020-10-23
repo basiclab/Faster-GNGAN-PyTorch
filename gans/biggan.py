@@ -222,7 +222,8 @@ def train():
                         z_rand, y_rand, x_real, y_real)
                     loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
                     if FLAGS.cr > 0:
-                        loss_cr = consistency_loss(net_D, real, pred_real)
+                        loss_cr = consistency_loss(
+                            net_D, x_real, y_real, pred_real)
                     else:
                         loss_cr = torch.tensor(0.)
                     loss_all = loss + FLAGS.cr * loss_cr

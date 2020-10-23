@@ -39,6 +39,7 @@ class ImageNetHDF5(Dataset):
     def create_hdf5(self, root, h5_path, chunk_size, size):
         dataloader = DataLoader(
             dataset=get_dataset('imagenet128'), batch_size=50, num_workers=8)
+        os.makedirs(os.path.dirname(h5_path), exist_ok=True)
         with h5.File(h5_path, 'w') as f:
             print('Dataset size: %d' % len(dataloader.dataset))
             imgs_dset = f.create_dataset(
@@ -81,7 +82,7 @@ class ImageNetHDF5(Dataset):
             image = transforms.functional.to_pil_image(torch.tensor(image))
             image = self.transform(image)
         else:
-            image = torch.tensor(image).float() * 2 - 1
+            image = torch.tensor(image).float() / 255 * 2 - 1
         return image, label
 
 
@@ -136,11 +137,8 @@ def get_dataset(name):
 
 if __name__ == "__main__":
     dataset = ImageNetHDF5(
-        './data/imagenet/train', size=128, in_memory=False, cache='./')
+        './data/imagenet/train', size=128, in_memory=False)
     print(len(dataset))
     image, label = dataset[0]
     print('image', image.shape, image.dtype, image.min(), image.max())
     print('label', label.shape, label.dtype)
-
-    from torchvision.utils import save_image
-    save_image((image + 1) / 2, 'test.png')
