@@ -14,7 +14,7 @@ class ConditionalBatchNorm2d(nn.Module):
         self.register_buffer('stored_var',  torch.ones(in_channel))
 
     def forward(self, x, y):
-        gain = self.gain(y).view(y.size(0), -1, 1, 1)
+        gain = self.gain(y).view(y.size(0), -1, 1, 1) + 1
         bias = self.bias(y).view(y.size(0), -1, 1, 1)
         x = F.batch_norm(
             x, self.stored_mean, self.stored_var, None, None, self.training)
@@ -63,7 +63,7 @@ class ResGenerator32(nn.Module):
             nn.Conv2d(256, 3, 3, stride=1, padding=1),
             nn.Tanh(),
         )
-        weights_init(self)
+        res32_weights_init(self)
 
     def forward(self, z, y):
         inputs = self.linear(z)
@@ -91,7 +91,7 @@ class ResGenerator128(nn.Module):
             nn.Conv2d(64, 3, 3, stride=1, padding=1),
             nn.Tanh(),
         )
-        weights_init(self)
+        res128_weights_init(self)
 
     def forward(self, z, y):
         inputs = self.linear(z)
@@ -152,7 +152,7 @@ class ResDiscriminator32(nn.Module):
             nn.ReLU(inplace=True))
         self.linear = nn.Linear(128, 1, bias=False)
         self.embedding = nn.Embedding(n_classes, 128)
-        weights_init(self)
+        res32_weights_init(self)
 
     def forward(self, x, y):
         x = self.main(x).sum(dim=[2, 3])
@@ -174,7 +174,7 @@ class ResConcatDiscriminator128(nn.Module):
             DisBlock(1024, 1024),
             nn.ReLU(inplace=True))
         self.linear = nn.Linear(1024, 1)
-        weights_init(self)
+        res128_weights_init(self)
 
     def forward(self, x, y):
         x = self.main1(x)
@@ -233,22 +233,16 @@ class GenDis(nn.Module):
             return net_D_fake
 
 
-def weights_init(m):
-    for name, module in m.named_modules():
-        if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
-            if 'residual' in name:
-                torch.nn.init.xavier_uniform_(module.weight, gain=math.sqrt(2))
-            else:
-                torch.nn.init.xavier_uniform_(module.weight, gain=1.0)
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        if isinstance(module, nn.Embedding):
-            if 'gain' in name:
-                torch.nn.init.ones_(module.weight)
-            elif 'bias' in name:
-                torch.nn.init.zeros_(module.weight)
-            else:
-                torch.nn.init.xavier_uniform_(module.weight)
+def res32_weights_init(m):
+    for module in m.modules():
+        if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
+            torch.nn.init.normal_(module.weight, std=0.02)
+
+
+def res128_weights_init(m):
+    for module in m.modules():
+        if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
+            torch.nn.init.orthogonal_(module.weight)
 
 
 generators = {

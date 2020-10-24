@@ -237,7 +237,7 @@ class GenDis(nn.Module):
 
 def weights_init(m):
     for name, module in m.named_modules():
-        if isinstance(module, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+        if isinstance(module, (nn.Conv2d, nn.Linear)):
             if 'residual' in name:
                 torch.nn.init.xavier_uniform_(module.weight, gain=math.sqrt(2))
             else:
