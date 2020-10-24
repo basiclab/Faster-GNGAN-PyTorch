@@ -175,7 +175,7 @@ def train():
 
     looper = infiniteloop(dataloader)
     with trange(start, FLAGS.total_steps + 1, dynamic_ncols=True,
-                initial=start, total=FLAGS.total_steps) as pbar:
+                initial=start - 1, total=FLAGS.total_steps) as pbar:
         for step in pbar:
             loss_sum = 0
             loss_real_sum = 0
