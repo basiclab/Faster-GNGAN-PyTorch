@@ -13,7 +13,7 @@ from common.losses import loss_fns
 from common.dataset import get_dataset
 from common.score.score import get_inception_and_fid_score
 from common.utils import (
-    ema, generate_images, save_images, module_no_grad, infiniteloop, set_seed)
+    ema, images_generator, save_images, module_no_grad, infiniteloop, set_seed)
 
 
 FLAGS = flags.FLAGS
@@ -49,45 +49,42 @@ flags.DEFINE_string('logdir', './logs/GN-cGAN_CIFAR10_0', 'log folder')
 flags.DEFINE_string('fid_cache', './stats/cifar10_test.npz', 'FID cache')
 # generate sample
 flags.DEFINE_bool('generate', False, 'generate images')
-flags.DEFINE_string('pretrain', None, 'path to test model')
-flags.DEFINE_string('output_dir', './outputs', 'path to output dir')
-flags.DEFINE_integer('num_images', 10000, 'the number of generated images')
+flags.DEFINE_integer('num_images', 50000, 'the number of generated images')
 
 device = torch.device('cuda:0')
 
 
 def generate():
-    assert FLAGS.pretrain is not None, "set model weight by --pretrain [model]"
-
     if FLAGS.norm == 'GN':
         Generator = gn_cgan.generators[FLAGS.arch]
         net_G = Generator(FLAGS.n_classes, FLAGS.z_dim).to(device)
     if FLAGS.norm == 'SN':
         Generator = sn_cgan.generators[FLAGS.arch]
         net_G = Generator(FLAGS.n_classes, FLAGS.z_dim).to(device)
-    net_G.load_state_dict(torch.load(FLAGS.pretrain)['net_G'])
+    net_G.load_state_dict(
+        torch.load(os.path.join(FLAGS.logdir, 'model.pt'))['ema_G'])
 
-    images = generate_images(
+    net_G.eval()
+    images = images_generator(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
         n_classes=FLAGS.n_classes,
         num_images=FLAGS.num_images,
-        batch_size=FLAGS.batch_size,
-        verbose=True)
-    save_images(images=images, output_dir=FLAGS.output_dir)
+        batch_size=FLAGS.batch_size)
+    save_images(
+        images, os.path.join(FLAGS.logdir, 'generate'), verbose=True)
 
 
 def evaluate(net_G):
-    images = generate_images(
+    images = images_generator(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
         n_classes=FLAGS.n_classes,
         num_images=FLAGS.num_images,
-        batch_size=FLAGS.batch_size,
-        verbose=False)
+        batch_size=FLAGS.batch_size)
     (IS, IS_std), FID = get_inception_and_fid_score(
-        images, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch,
-        parallel=FLAGS.parallel)
+        images, FLAGS.fid_cache, num_images=FLAGS.num_images,
+        use_torch=FLAGS.eval_use_torch, parallel=FLAGS.parallel)
     del images
     return (IS, IS_std), FID
 
