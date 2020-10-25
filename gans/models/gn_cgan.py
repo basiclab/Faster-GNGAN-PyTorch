@@ -1,5 +1,3 @@
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -198,7 +196,7 @@ class ResPorjectDiscriminator128(nn.Module):
             nn.ReLU(inplace=True))
         self.embed = nn.Embedding(n_classes, 1024)
         self.linear = nn.Linear(1024, 1)
-        weights_init(self)
+        res128_weights_init(self)
 
     def forward(self, x, y):
         x = self.main(x).sum(dim=[2, 3])
@@ -237,12 +235,16 @@ def res32_weights_init(m):
     for module in m.modules():
         if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
             torch.nn.init.normal_(module.weight, std=0.02)
+            if hasattr(module, 'bias') and module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
 
 
 def res128_weights_init(m):
     for module in m.modules():
         if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
-            torch.nn.init.orthogonal_(module.weight)
+            torch.nn.init.kaiming_normal_(module.weight)
+            if hasattr(module, 'bias') and module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
 
 
 generators = {
