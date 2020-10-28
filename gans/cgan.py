@@ -288,6 +288,7 @@ def train():
                 writer_ema.add_scalar('IS_std', ema_G_IS_std, step)
                 writer_ema.add_scalar('FID', ema_G_FID, step)
                 writer.flush()
+                writer_ema.flush()
                 with open(os.path.join(FLAGS.logdir, 'eval.txt'), 'a') as f:
                     f.write(json.dumps(
                         {
@@ -301,6 +302,7 @@ def train():
                         }) + "\n"
                     )
     writer.close()
+    writer_ema.close()
 
 
 def main(argv):

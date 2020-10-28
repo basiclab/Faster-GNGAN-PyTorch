@@ -234,7 +234,7 @@ class GenDis(nn.Module):
 def res32_weights_init(m):
     for module in m.modules():
         if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
-            torch.nn.init.normal_(module.weight, std=0.02)
+            torch.nn.init.kaiming_normal_(module.weight)
             if hasattr(module, 'bias') and module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
 

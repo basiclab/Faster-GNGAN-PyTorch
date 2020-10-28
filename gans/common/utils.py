@@ -35,7 +35,7 @@ def generate_images(net_G, z_dim, n_classes=None, num_images=10000,
 
 def images_generator(net_G, z_dim, n_classes=None, num_images=50000,
                      batch_size=64):
-    """Python generator version for generating large number of images"""
+    """Python generator for generating large number of images"""
     with torch.no_grad():
         for start in range(0, num_images, batch_size):
             batch_size = min(batch_size, num_images - start)
