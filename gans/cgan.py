@@ -245,7 +245,7 @@ def train():
                 fake_imgs = []
                 with torch.no_grad():
                     for fixed_z_batch, fixed_y_batch in zip(fixed_z, fixed_y):
-                        fake = net_G(fixed_z_batch, fixed_y_batch).cpu()
+                        fake = ema_G(fixed_z_batch, fixed_y_batch).cpu()
                         fake_imgs.append((fake + 1) / 2)
                     grid = make_grid(torch.cat(fake_imgs, dim=0))
                 writer.add_image('sample', grid, step)
