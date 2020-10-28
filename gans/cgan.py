@@ -216,9 +216,8 @@ def train():
             writer.add_scalar('loss_fake', loss_fake, step)
 
             pbar.set_postfix(
-                loss='%.4f' % loss,
-                loss_real='%.4f' % loss_real,
-                loss_fake='%.4f' % loss_fake)
+                loss_real='%.3f' % loss_real,
+                loss_fake='%.3f' % loss_fake)
 
             # Generator
             net_G.train()
@@ -276,8 +275,8 @@ def train():
                 (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(eval_ema_G)
                 pbar.write(
                     "%6d/%6d "
-                    "IS: %6.3f(%.3f), FID: %7.3f, "
-                    "IS(EMA): %6.3f(%.3f), FID(EMA): %7.3f" % (
+                    "IS:%6.3f(%.3f), FID:%7.3f, "
+                    "IS(EMA):%6.3f(%.3f), FID(EMA):%7.3f" % (
                         step, FLAGS.total_steps,
                         net_G_IS, net_G_IS_std, net_G_FID,
                         ema_G_IS, ema_G_IS_std, ema_G_FID))

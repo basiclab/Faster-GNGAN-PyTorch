@@ -216,9 +216,8 @@ def train():
             writer.add_scalar('loss_cr', loss_cr, step)
 
             pbar.set_postfix(
-                loss='%.4f' % loss,
-                loss_real='%.4f' % loss_real,
-                loss_fake='%.4f' % loss_fake)
+                loss_real='%.3f' % loss_real,
+                loss_fake='%.3f' % loss_fake)
 
             # Generator
             net_G.train()
@@ -261,7 +260,7 @@ def train():
                 (IS, IS_std), FID = evaluate(net_G)
                 pbar.write(
                     "%6d/%6d "
-                    "IS: %6.3f(%.3f), FID: %7.3f" % (
+                    "IS:%6.3f(%.3f), FID:%7.3f" % (
                         step, FLAGS.total_steps,
                         IS, IS_std, FID))
                 writer.add_scalar('IS', IS, step)
