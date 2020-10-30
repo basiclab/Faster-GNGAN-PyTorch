@@ -190,6 +190,14 @@ def train():
         writer.add_image('real_sample', grid)
         writer.flush()
         start = 1
+    
+    D_size = 0
+    for param in net_D.parameters():
+        D_size += param.data.nelement()
+    G_size = 0
+    for param in net_G.parameters():
+        G_size += param.data.nelement()
+    print('D params: %d, G params: %d' % (D_size, G_size))
 
     z_rand = torch.zeros(
         FLAGS.batch_size, FLAGS.z_dim, dtype=torch.float).to(device)
