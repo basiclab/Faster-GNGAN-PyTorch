@@ -11,6 +11,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("Calculate FID and inception score")
     parser.add_argument('--dir', type=str, required=True)
     parser.add_argument('--fid_cache', type=str, required=True)
+    parser.add_argument('--eval_use_torch', action='store_true', default=False)
     args = parser.parse_args()
 
     files = (
@@ -26,5 +27,5 @@ if __name__ == "__main__":
 
     (IS, IS_std), FID = get_inception_and_fid_score(
         loader, args.fid_cache, num_images=len(files),
-        verbose=True, use_torch=True)
+        verbose=True, use_torch=args.eval_use_torch)
     print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
