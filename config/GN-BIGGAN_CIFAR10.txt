@@ -5,7 +5,7 @@
 --ch=64
 --D_accumulation=1
 --dataset=cifar10
---D_lr=0.0001
+--D_lr=0.0002
 --ema_decay=0.9999
 --ema_start=1000
 --eval_step=5000
@@ -16,7 +16,7 @@
 --loss=hinge
 --lr_decay_start=125000
 --n_classes=10
---n_dis=5
+--n_dis=4
 --norm=GN
 --num_images=50000
 --sample_size=64
