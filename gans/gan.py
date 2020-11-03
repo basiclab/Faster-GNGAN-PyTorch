@@ -45,7 +45,6 @@ flags.DEFINE_string('logdir', './logs/GN-GAN_CIFAR10_RES_0', 'log folder')
 flags.DEFINE_string('fid_cache', './stats/cifar10_test.npz', 'FID cache')
 # generate
 flags.DEFINE_bool('generate', False, 'generate images')
-flags.DEFINE_string('output_dir', './outputs', 'path to output dir')
 flags.DEFINE_integer('num_images', 50000, 'the number of generated images')
 
 device = torch.device('cuda:0')
@@ -67,7 +66,7 @@ def generate():
         num_images=FLAGS.num_images,
         batch_size=FLAGS.batch_size,
         verbose=True)
-    save_images(images=images, output_dir=FLAGS.output_dir)
+    save_images(images, os.path.join(FLAGS.logdir, 'generate'))
     (IS, IS_std), FID = get_inception_and_fid_score(
         images, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch, verbose=True)
     print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
