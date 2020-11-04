@@ -103,7 +103,8 @@ class CenterCropLongEdge(object):
 
 
 def get_dataset(name):
-    assert name in ['cifar10', 'stl10', 'imagenet128', 'imagenet128.hdf5']
+    assert name in [
+        'cifar10', 'stl10', 'imagenet128', 'imagenet128.hdf5', 'celebhq128']
     if name == 'cifar10':
         return torchvision.datasets.CIFAR10(
             './data', train=True, download=True,
@@ -133,6 +134,14 @@ def get_dataset(name):
     if name == 'imagenet128.hdf5':
         return ImageNetHDF5(
             './data/imagenet/train', size=128, in_memory=True)
+    if name == 'celebhq128':
+        return torchvision.datasets.ImageFolder(
+            './data/celebhq/',
+            transform=transforms.Compose([
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+            ]))
 
 
 if __name__ == "__main__":

@@ -21,7 +21,8 @@ FLAGS = flags.FLAGS
 # resume
 flags.DEFINE_bool('resume', False, 'resume from logdir')
 # model and training
-flags.DEFINE_enum('dataset', 'cifar10', ['cifar10', 'stl10'], "select dataset")
+flags.DEFINE_enum('dataset', 'cifar10',
+                  ['cifar10', 'stl10', 'celebhq128'], "select dataset")
 flags.DEFINE_enum('arch', 'res32', gn_gan.generators.keys(), "architecture")
 flags.DEFINE_enum('norm', 'GN', ['GN', 'SN'], "normalization techniques")
 flags.DEFINE_integer('total_steps', 200000, "total number of training steps")

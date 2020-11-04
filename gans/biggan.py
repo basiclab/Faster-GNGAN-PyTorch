@@ -190,7 +190,7 @@ def train():
         writer.add_image('real_sample', grid)
         writer.flush()
         start = 1
-    
+
     D_size = 0
     for param in net_D.parameters():
         D_size += param.data.nelement()
