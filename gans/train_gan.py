@@ -1,6 +1,5 @@
 import os
 import json
-from copy import deepcopy
 
 import torch
 import torch.optim as optim
@@ -116,7 +115,7 @@ def consistency_loss(net_D, real, pred_real):
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ])
 
-    aug_real = deepcopy(real.cpu())
+    aug_real = real.detach().clone().cpu()
     for idx, img in enumerate(aug_real):
         aug_real[idx] = consistency_transforms(img)
     aug_real = aug_real.to(device)
