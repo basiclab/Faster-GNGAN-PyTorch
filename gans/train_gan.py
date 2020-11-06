@@ -75,7 +75,7 @@ device = torch.device('cuda:0')
 
 
 def generate():
-    net_G = net_G_models[FLAGS.arch]().to(device)
+    net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
     net_G.load_state_dict(
         torch.load(os.path.join(FLAGS.logdir, 'model.pt'))['net_G'])
 
@@ -131,7 +131,7 @@ def train():
         num_workers=FLAGS.num_workers, drop_last=True)
 
     # model
-    net_G = net_G_models[FLAGS.arch]().to(device)
+    net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
     net_D = net_D_models[FLAGS.arch]().to(device)
     if FLAGS.arch.startswith('gn'):
         net_D = gn_gan.GradNorm(net_D)
@@ -196,7 +196,8 @@ def train():
                 with torch.no_grad():
                     z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
                     fake = net_G(z).detach()
-                real = next(looper).to(device)
+                real, _ = next(looper)
+                real = real.to(device)
                 pred_real = net_D(real)
                 pred_fake = net_D(fake)
                 loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
