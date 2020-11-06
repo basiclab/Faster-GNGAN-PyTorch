@@ -16,6 +16,7 @@ pretrain
 data
 stats
 *.png
+_cache_*
 
 # pdf
 *.pdf

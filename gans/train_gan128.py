@@ -8,67 +8,76 @@ from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
-from models import sn_cgan, gn_cgan, gn_gan
-from common.losses import loss_fns
-from common.dataset import get_dataset
+from models import gn_gan, sn_gan
+from common.losses import HingeLoss
+from common.datasets import get_dataset
 from common.score.score import get_inception_and_fid_score
 from common.utils import (
     ema, images_generator, save_images, module_no_grad, infiniteloop, set_seed)
+
+
+net_G_models = {
+    'gn-res128': gn_gan.ResGenerator128,
+    'sn-res128': sn_gan.ResGenerator128,
+}
+
+net_D_models = {
+    'gn-res128': gn_gan.ResDiscriminator128,
+    'sn-res128': sn_gan.ResDiscriminator128,
+}
+
+net_GD_models = {
+    'gn-res128': gn_gan.GenDis,
+    'sn-res128': sn_gan.GenDis,
+}
+
+datasets = ['celebhq128', 'celebhq128.hdf5', 'imagenet128', 'imagenet128.hdf5']
 
 
 FLAGS = flags.FLAGS
 # resume
 flags.DEFINE_bool('resume', False, 'resume from logdir')
 # model and training
-flags.DEFINE_enum('dataset', 'cifar10',
-                  ['cifar10', 'imagenet128', 'imagenet128.hdf5'], "dataset")
-flags.DEFINE_enum('arch', 'res32', sn_cgan.generators.keys(), "architecture")
-flags.DEFINE_enum('norm', 'GN', ['GN', 'SN'], "normalization techniques")
-flags.DEFINE_integer('n_classes', 10, 'the number of classes in dataset')
+flags.DEFINE_enum('dataset', 'celebhq128', datasets, "select dataset")
+flags.DEFINE_enum('arch', 'gn-res128', net_G_models.keys(), "architecture")
 flags.DEFINE_integer('total_steps', 200000, "total number of training steps")
-flags.DEFINE_integer('lr_decay_start', 0, 'apply linearly decay to lr')
-flags.DEFINE_integer('batch_size', 64, "batch size")
+flags.DEFINE_integer('lr_decay_start', 200000, 'apply linearly decay to lr')
+flags.DEFINE_integer('batch_size', 16, "batch size")
 flags.DEFINE_integer('num_workers', 8, "dataloader workers")
+flags.DEFINE_integer('G_accumulation', 1, 'gradient accumulation for G')
+flags.DEFINE_integer('D_accumulation', 1, 'gradient accumulation for D')
 flags.DEFINE_float('G_lr', 2e-4, "Generator learning rate")
 flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
-flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
 flags.DEFINE_bool('parallel', False, 'multi-gpu training')
 flags.DEFINE_integer('seed', 0, "random seed")
 # ema
 flags.DEFINE_float('ema_decay', 0.9999, "ema decay rate")
-flags.DEFINE_integer('ema_start', 1000, "start step for ema")
+flags.DEFINE_integer('ema_start', 5000, "start step for ema")
 # logging
 flags.DEFINE_bool('eval_use_torch', False, 'calculate IS and FID on gpu')
 flags.DEFINE_integer('eval_step', 5000, "evaluate FID and Inception Score")
 flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
 flags.DEFINE_integer('sample_size', 64, "sampling size of images")
-flags.DEFINE_string('logdir', './logs/GN-cGAN_CIFAR10_0', 'log folder')
-flags.DEFINE_string('fid_cache', './stats/cifar10_test.npz', 'FID cache')
-# generate sample
+flags.DEFINE_string('logdir', './logs/GN-GAN_CELEBHQ128_RES_0', 'log folder')
+flags.DEFINE_string('fid_cache', './stats/celebhq_val128.npz', 'FID cache')
+# generate
 flags.DEFINE_bool('generate', False, 'generate images')
-flags.DEFINE_integer('num_images', 50000, 'the number of generated images')
+flags.DEFINE_integer('num_images', 10000, 'the number of generated images')
 
 device = torch.device('cuda:0')
 
 
 def generate():
-    if FLAGS.norm == 'GN':
-        Generator = gn_cgan.generators[FLAGS.arch]
-        net_G = Generator(FLAGS.n_classes, FLAGS.z_dim).to(device)
-    if FLAGS.norm == 'SN':
-        Generator = sn_cgan.generators[FLAGS.arch]
-        net_G = Generator(FLAGS.n_classes, FLAGS.z_dim).to(device)
+    net_G = net_G_models[FLAGS.arch]().to(device)
     net_G.load_state_dict(
-        torch.load(os.path.join(FLAGS.logdir, 'model.pt'))['ema_G'])
+        torch.load(os.path.join(FLAGS.logdir, 'model.pt'))['net_G'])
 
-    net_G.eval()
     images = images_generator(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
-        n_classes=FLAGS.n_classes,
         num_images=FLAGS.num_images,
         batch_size=FLAGS.batch_size)
     save_images(
@@ -79,7 +88,6 @@ def evaluate(net_G):
     images = images_generator(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
-        n_classes=FLAGS.n_classes,
         num_images=FLAGS.num_images,
         batch_size=FLAGS.batch_size)
     (IS, IS_std), FID = get_inception_and_fid_score(
@@ -96,21 +104,12 @@ def train():
         num_workers=FLAGS.num_workers, drop_last=True)
 
     # model
-    if FLAGS.norm == 'GN':
-        Generator = gn_cgan.generators[FLAGS.arch]
-        Discriminator = gn_cgan.discriminators[FLAGS.arch]
-        net_G = Generator(FLAGS.n_classes, FLAGS.z_dim).to(device)
-        ema_G = Generator(FLAGS.n_classes, FLAGS.z_dim).to(device)
-        net_D = Discriminator(FLAGS.n_classes).to(device)
+    net_G = net_G_models[FLAGS.arch]().to(device)
+    ema_G = net_G_models[FLAGS.arch]().to(device)
+    net_D = net_D_models[FLAGS.arch]().to(device)
+    if FLAGS.arch.startswith('gn'):
         net_D = gn_gan.GradNorm(net_D)
-        net_GD = gn_cgan.GenDis(net_G, net_D)
-    if FLAGS.norm == 'SN':
-        Generator = sn_cgan.generators[FLAGS.arch]
-        Discriminator = sn_cgan.discriminators[FLAGS.arch]
-        net_G = Generator(FLAGS.n_classes, FLAGS.z_dim).to(device)
-        ema_G = Generator(FLAGS.n_classes, FLAGS.z_dim).to(device)
-        net_D = Discriminator(FLAGS.n_classes).to(device)
-        net_GD = sn_cgan.GenDis(net_G, net_D)
+    net_GD = net_GD_models[FLAGS.arch](net_G, net_D)
 
     if FLAGS.parallel:
         net_GD = torch.nn.DataParallel(net_GD)
@@ -119,7 +118,7 @@ def train():
     ema(net_G, ema_G, decay=0)
 
     # loss
-    loss_fn = loss_fns[FLAGS.loss]()
+    loss_fn = HingeLoss()
 
     # optimizer
     optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
@@ -141,27 +140,20 @@ def train():
         sched_D.load_state_dict(ckpt['sched_D'])
         ema_G.load_state_dict(ckpt['ema_G'])
         fixed_z = ckpt['fixed_z']
-        fixed_y = ckpt['fixed_y']
         start = ckpt['step'] + 1
         writer = SummaryWriter(FLAGS.logdir)
         writer_ema = SummaryWriter(FLAGS.logdir + "_ema")
         del ckpt
     else:
-        # sample fixed z and y
         os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
         writer = SummaryWriter(FLAGS.logdir)
         writer_ema = SummaryWriter(FLAGS.logdir + "_ema")
         fixed_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
         fixed_z = torch.split(fixed_z, FLAGS.batch_size, dim=0)
-        fixed_y = torch.randint(
-            FLAGS.n_classes, (FLAGS.sample_size,)).to(device)
-        fixed_y = torch.split(fixed_y, FLAGS.batch_size, dim=0)
         with open(os.path.join(FLAGS.logdir, "flagfile.txt"), 'w') as f:
             f.write(FLAGS.flags_into_string())
         writer.add_text(
             "flagfile", FLAGS.flags_into_string().replace('\n', '  \n'))
-
-        # sample real data
         real = []
         for x, _ in dataloader:
             real.append(x)
@@ -173,10 +165,16 @@ def train():
         writer.flush()
         start = 1
 
-    z_rand = torch.zeros(
-        FLAGS.batch_size * 2, FLAGS.z_dim, dtype=torch.float).to(device)
-    y_rand = torch.zeros(
-        FLAGS.batch_size * 2, dtype=torch.long).to(device)
+    D_size = 0
+    for param in net_D.parameters():
+        D_size += param.data.nelement()
+    G_size = 0
+    for param in net_G.parameters():
+        G_size += param.data.nelement()
+    print('D params: %d, G params: %d' % (D_size, G_size))
+
+    z = torch.randn(2 * FLAGS.batch_size, FLAGS.z_dim, requires_grad=False)
+    z = z.to(device)
 
     looper = infiniteloop(dataloader)
     with trange(start, FLAGS.total_steps + 1, dynamic_ncols=True,
@@ -187,29 +185,25 @@ def train():
             loss_fake_sum = 0
 
             # Discriminator
-            net_D.train()
             for _ in range(FLAGS.n_dis):
-                x_real, y_real = next(looper)
-                x_real, y_real = x_real.to(device), y_real.to(device)
-                z_rand.normal_()
-                y_rand.random_(FLAGS.n_classes)
-                pred_real, pred_fake = net_GD(
-                    z_rand[: FLAGS.batch_size],
-                    y_rand[: FLAGS.batch_size],
-                    x_real,
-                    y_real)
-                loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
                 optim_D.zero_grad()
-                loss.backward()
+                for _ in range(FLAGS.D_accumulation):
+                    real, _ = next(looper)
+                    real = real.to(device)
+                    z.normal_()
+                    pred_real, pred_fake = net_GD(z[: FLAGS.batch_size], real)
+                    loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
+                    loss = loss / float(FLAGS.D_accumulation)
+                    loss.backward()
+
+                    loss_sum += loss.cpu().item()
+                    loss_real_sum += loss_real.cpu().item()
+                    loss_fake_sum += loss_fake.cpu().item()
                 optim_D.step()
 
-                loss_sum += loss.cpu().item()
-                loss_real_sum += loss_real.cpu().item()
-                loss_fake_sum += loss_fake.cpu().item()
-
-            loss = loss_sum / FLAGS.n_dis
-            loss_real = loss_real_sum / FLAGS.n_dis
-            loss_fake = loss_fake_sum / FLAGS.n_dis
+            loss = loss_sum / FLAGS.n_dis / FLAGS.D_accumulation
+            loss_real = loss_real_sum / FLAGS.n_dis / FLAGS.D_accumulation
+            loss_fake = loss_fake_sum / FLAGS.n_dis / FLAGS.D_accumulation
 
             writer.add_scalar('loss', loss, step)
             writer.add_scalar('loss_real', loss_real, step)
@@ -221,12 +215,13 @@ def train():
 
             # Generator
             net_G.train()
-            z_rand.normal_()
-            y_rand.random_(FLAGS.n_classes)
-            with module_no_grad(net_D):
-                loss = loss_fn(net_GD(z_rand, y_rand))
             optim_G.zero_grad()
-            loss.backward()
+            for _ in range(FLAGS.G_accumulation):
+                z.normal_()
+                with module_no_grad(net_D):
+                    loss = loss_fn(net_GD(z))
+                loss = loss / float(FLAGS.G_accumulation)
+                loss.backward()
             optim_G.step()
 
             # ema
@@ -240,17 +235,19 @@ def train():
             sched_G.step()
             sched_D.step()
 
+            # sample from fixed z
             if step == 1 or step % FLAGS.sample_step == 0:
                 fake_imgs = []
                 with torch.no_grad():
-                    for fixed_z_batch, fixed_y_batch in zip(fixed_z, fixed_y):
-                        fake = ema_G(fixed_z_batch, fixed_y_batch).cpu()
+                    for fixed_z_batch in fixed_z:
+                        fake = ema_G(fixed_z_batch).cpu()
                         fake_imgs.append((fake + 1) / 2)
                     grid = make_grid(torch.cat(fake_imgs, dim=0))
                 writer.add_image('sample', grid, step)
                 save_image(grid, os.path.join(
                     FLAGS.logdir, 'sample', '%d.png' % step))
 
+            # evaluate IS, FID and save model
             if step == 1 or step % FLAGS.eval_step == 0:
                 ckpt = {
                     'net_G': net_G.state_dict(),
@@ -262,7 +259,6 @@ def train():
                     'ema_G': ema_G.state_dict(),
                     'step': step,
                     'fixed_z': fixed_z,
-                    'fixed_y': fixed_y,
                 }
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
                 if FLAGS.parallel:

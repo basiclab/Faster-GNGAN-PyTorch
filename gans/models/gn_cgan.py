@@ -1,5 +1,3 @@
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.init as init
@@ -16,8 +14,8 @@ class ConditionalBatchNorm2d(nn.Module):
         self.initialize()
 
     def initialize(self):
-        torch.nn.init.ones_(self.gain.weight)
-        torch.nn.init.zeros_(self.bias.weight)
+        init.ones_(self.gain.weight)
+        init.zeros_(self.bias.weight)
 
     def forward(self, x, y):
         gain = self.gain(y).view(y.size(0), -1, 1, 1)
@@ -50,11 +48,11 @@ class GenBlock(nn.Module):
     def initialize(self):
         for m in list(self.cnn1.modules()) + list(self.cnn2.modules()):
             if isinstance(m, nn.Conv2d):
-                init.xavier_uniform_(m.weight, math.sqrt(2))
+                init.kaiming_normal_(m.weight)
                 init.zeros_(m.bias)
         for m in self.shortcut.modules():
             if isinstance(m, nn.Conv2d):
-                init.xavier_uniform_(m.weight)
+                init.kaiming_normal_(m.weight)
                 init.zeros_(m.bias)
 
     def forward(self, x, y):
@@ -64,71 +62,71 @@ class GenBlock(nn.Module):
 
 
 class ResGenerator32(nn.Module):
-    def __init__(self, n_classes, z_dim):
+    def __init__(self, ch, n_classes, z_dim):
         super().__init__()
-        self.linear = nn.Linear(z_dim, 4 * 4 * 256)
+        self.linear = nn.Linear(z_dim, 4 * 4 * ch * 4)
         self.blocks = nn.ModuleList([
-            GenBlock(256, 256, n_classes),
-            GenBlock(256, 256, n_classes),
-            GenBlock(256, 256, n_classes),
+            GenBlock(ch * 4, ch * 4, n_classes),
+            GenBlock(ch * 4, ch * 4, n_classes),
+            GenBlock(ch * 4, ch * 4, n_classes),
         ])
         self.output = nn.Sequential(
-            nn.BatchNorm2d(256),
+            nn.BatchNorm2d(ch * 4),
             nn.ReLU(),
-            nn.Conv2d(256, 3, 3, stride=1, padding=1),
+            nn.Conv2d(ch * 4, 3, 3, stride=1, padding=1),
             nn.Tanh(),
         )
         # initialize weight
         self.initialize()
 
     def initialize(self):
-        init.xavier_uniform_(self.linear.weight)
+        init.kaiming_normal_(self.linear.weight)
         init.zeros_(self.linear.bias)
         for m in self.output.modules():
             if isinstance(m, nn.Conv2d):
-                init.xavier_uniform_(m.weight, math.sqrt(2))
+                init.kaiming_normal_(m.weight)
                 init.zeros_(m.bias)
 
     def forward(self, z, y):
         inputs = self.linear(z)
-        inputs = inputs.view(-1, 256, 4, 4)
+        inputs = inputs.view(z.shape[0], -1, 4, 4)
         for module in self.blocks:
             inputs = module(inputs, y)
         return self.output(inputs)
 
 
 class ResGenerator128(nn.Module):
-    def __init__(self, n_classes, z_dim):
+    def __init__(self, ch, n_classes, z_dim):
         super().__init__()
-        self.linear = nn.Linear(z_dim, 4 * 4 * 1024)
+        self.linear = nn.Linear(z_dim, 4 * 4 * ch * 16)
 
         self.blocks = nn.ModuleList([
-            GenBlock(1024, 1024, n_classes),
-            GenBlock(1024, 512, n_classes),
-            GenBlock(512, 256, n_classes),
-            GenBlock(256, 128, n_classes),
-            GenBlock(128, 64, n_classes),
+            GenBlock(ch * 16, ch * 16, n_classes),
+            GenBlock(ch * 16, ch * 8, n_classes),
+            GenBlock(ch * 8, ch * 4, n_classes),
+            GenBlock(ch * 4, ch * 2, n_classes),
+            GenBlock(ch * 2, ch, n_classes),
         ])
         self.output = nn.Sequential(
-            nn.BatchNorm2d(64),
+            nn.BatchNorm2d(ch),
             nn.ReLU(),
-            nn.Conv2d(64, 3, 3, stride=1, padding=1),
+            nn.Conv2d(ch, 3, 3, stride=1, padding=1),
             nn.Tanh(),
         )
         # initialize weight
         self.initialize()
 
     def initialize(self):
-        init.xavier_uniform_(self.linear.weight)
+        init.kaiming_normal_(self.linear.weight)
         init.zeros_(self.linear.bias)
         for m in self.output.modules():
             if isinstance(m, nn.Conv2d):
-                init.xavier_uniform_(m.weight, math.sqrt(2))
+                init.kaiming_normal_(m.weight)
                 init.zeros_(m.bias)
 
     def forward(self, z, y):
         inputs = self.linear(z)
-        inputs = inputs.view(-1, 1024, 4, 4)
+        inputs = inputs.view(z.shape[0], -1, 4, 4)
         for module in self.blocks:
             inputs = module(inputs, y)
         return self.output(inputs)
@@ -153,11 +151,11 @@ class OptimizedDisblock(nn.Module):
     def initialize(self):
         for m in self.residual.modules():
             if isinstance(m, nn.Conv2d):
-                init.xavier_uniform_(m.weight, math.sqrt(2))
+                init.kaiming_normal_(m.weight)
                 init.zeros_(m.bias)
         for m in self.shortcut.modules():
             if isinstance(m, nn.Conv2d):
-                init.xavier_uniform_(m.weight)
+                init.kaiming_normal_(m.weight)
                 init.zeros_(m.bias)
 
     def forward(self, x):
@@ -190,11 +188,11 @@ class DisBlock(nn.Module):
     def initialize(self):
         for m in self.residual.modules():
             if isinstance(m, nn.Conv2d):
-                init.xavier_uniform_(m.weight, math.sqrt(2))
+                init.kaiming_normal_(m.weight)
                 init.zeros_(m.bias)
         for m in self.shortcut.modules():
             if isinstance(m, nn.Conv2d):
-                init.xavier_uniform_(m.weight)
+                init.kaiming_normal_(m.weight)
                 init.zeros_(m.bias)
 
     def forward(self, x):
@@ -202,21 +200,21 @@ class DisBlock(nn.Module):
 
 
 class ResDiscriminator32(nn.Module):
-    def __init__(self, n_classes):
+    def __init__(self, ch, n_classes):
         super().__init__()
         self.main = nn.Sequential(
-            OptimizedDisblock(3, 128),
-            DisBlock(128, 128, down=True),
-            DisBlock(128, 128),
-            DisBlock(128, 128),
+            OptimizedDisblock(3, ch * 2),
+            DisBlock(ch * 2, ch * 2, down=True),
+            DisBlock(ch * 2, ch * 2),
+            DisBlock(ch * 2, ch * 2),
             nn.ReLU(inplace=True))
-        self.linear = nn.Linear(128, 1, bias=False)
-        self.embed = nn.Embedding(n_classes, 128)
+        self.linear = nn.Linear(ch * 2, 1, bias=False)
+        self.embed = nn.Embedding(n_classes, ch * 2)
         self.initialize()
 
     def initialize(self):
-        init.xavier_uniform_(self.linear.weight)
-        init.xavier_uniform_(self.embed.weight)
+        init.kaiming_normal_(self.linear.weight)
+        init.kaiming_normal_(self.embed.weight)
 
     def forward(self, x, y):
         x = self.main(x).sum(dim=[2, 3])
@@ -225,25 +223,25 @@ class ResDiscriminator32(nn.Module):
 
 
 class ResConcatDiscriminator128(nn.Module):
-    def __init__(self, n_classes):
+    def __init__(self, ch, n_classes):
         super().__init__()
         self.main1 = nn.Sequential(
-            OptimizedDisblock(3, 64),
-            DisBlock(64, 128, down=True),
-            DisBlock(128, 256, down=True))
+            OptimizedDisblock(3, ch),
+            DisBlock(ch, ch * 2, down=True),
+            DisBlock(ch * 2, ch * 4, down=True))
         self.embed = nn.Embedding(n_classes, 128)
         self.main2 = nn.Sequential(
-            DisBlock(256 + 128, 512, down=True),
-            DisBlock(512, 1024, down=True),
-            DisBlock(1024, 1024),
+            DisBlock(ch * 4 + 128, ch * 8, down=True),
+            DisBlock(ch * 8, ch * 16, down=True),
+            DisBlock(ch * 16, ch * 16),
             nn.ReLU(inplace=True))
-        self.linear = nn.Linear(1024, 1)
+        self.linear = nn.Linear(ch * 16, 1)
         self.initialize()
 
     def initialize(self):
-        init.xavier_uniform_(self.linear.weight)
+        init.kaiming_normal_(self.linear.weight)
         init.zeros_(self.linear.bias)
-        init.xavier_uniform_(self.embed.weight)
+        init.kaiming_normal_(self.embed.weight)
 
     def forward(self, x, y):
         x = self.main1(x)
@@ -255,24 +253,24 @@ class ResConcatDiscriminator128(nn.Module):
 
 
 class ResPorjectDiscriminator128(nn.Module):
-    def __init__(self, n_classes):
+    def __init__(self, ch, n_classes):
         super().__init__()
         self.main = nn.Sequential(
-            OptimizedDisblock(3, 64),
-            DisBlock(64, 128, down=True),
-            DisBlock(128, 256, down=True),
-            DisBlock(256, 512, down=True),
-            DisBlock(512, 1024, down=True),
-            DisBlock(1024, 1024),
+            OptimizedDisblock(3, ch),
+            DisBlock(ch, ch * 2, down=True),
+            DisBlock(ch * 2, ch * 4, down=True),
+            DisBlock(ch * 4, ch * 8, down=True),
+            DisBlock(ch * 8, ch * 16, down=True),
+            DisBlock(ch * 16, ch * 16),
             nn.ReLU(inplace=True))
-        self.embed = nn.Embedding(n_classes, 1024)
-        self.linear = nn.Linear(1024, 1)
+        self.embed = nn.Embedding(n_classes, ch * 16)
+        self.linear = nn.Linear(ch * 16, 1)
         self.initialize()
 
     def initialize(self):
-        init.xavier_uniform_(self.linear.weight)
+        init.kaiming_normal_(self.linear.weight)
         init.zeros_(self.linear.bias)
-        init.xavier_uniform_(self.embed.weight)
+        init.kaiming_normal_(self.embed.weight)
 
     def forward(self, x, y):
         x = self.main(x).sum(dim=[2, 3])
@@ -305,16 +303,3 @@ class GenDis(nn.Module):
             x_fake = self.net_G(z, y_fake)
             net_D_fake = self.net_D(x_fake, y=y_fake)
             return net_D_fake
-
-
-generators = {
-    'res32': ResGenerator32,
-    'res128_concat': ResGenerator128,
-    'res128_project': ResGenerator128,
-}
-
-discriminators = {
-    'res32': ResDiscriminator32,
-    'res128_concat': ResConcatDiscriminator128,
-    'res128_project': ResPorjectDiscriminator128,
-}

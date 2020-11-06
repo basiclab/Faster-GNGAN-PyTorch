@@ -3,14 +3,14 @@
 --D_lr=0.0002
 --G_lr=0.0002
 --arch=gn-res128
---batch_size=16
+--batch_size=256
 --dataset=celebhq128.hdf5
 --ema_decay=0.9999
 --ema_start=20000
 --eval_step=2000
 --eval_use_torch
 --fid_cache=./stats/celebhq_val128.npz
---logdir=./logs/GN-GAN_CELEBHQ128_RES_0
+--logdir=./logs/GN-GAN_CELEBHQ128_RES_bs256_0
 --lr_decay_start=200000
 --n_dis=5
 --num_images=10000

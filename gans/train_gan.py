@@ -11,20 +11,44 @@ from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from models import gn_gan, sn_gan
-from common.losses import loss_fns
-from common.dataset import get_dataset
+from common.losses import HingeLoss
+from common.datasets import get_dataset
 from common.score.score import get_inception_and_fid_score
-from common.utils import (
-    generate_images, save_images, module_no_grad, infiniteloop, set_seed)
+from common.utils import generate_images, save_images, infiniteloop, set_seed
+
+
+net_G_models = {
+    'gn-cnn32': gn_gan.Generator32,
+    'gn-cnn48': gn_gan.Generator48,
+    'gn-res32': gn_gan.ResGenerator32,
+    'gn-res48': gn_gan.ResGenerator48,
+    'sn-cnn32': sn_gan.Generator32,
+    'sn-cnn48': sn_gan.Generator48,
+    'sn-res32': sn_gan.ResGenerator32,
+    'sn-res48': sn_gan.ResGenerator48,
+}
+
+net_D_models = {
+    'gn-cnn32': gn_gan.Discriminator32,
+    'gn-cnn48': gn_gan.Discriminator48,
+    'gn-res32': gn_gan.ResDiscriminator32,
+    'gn-res48': gn_gan.ResDiscriminator48,
+    'sn-cnn32': sn_gan.Discriminator32,
+    'sn-cnn48': sn_gan.Discriminator48,
+    'sn-res32': sn_gan.ResDiscriminator32,
+    'sn-res48': sn_gan.ResDiscriminator48,
+}
+
+
+datasets = ['cifar10', 'stl10']
+
 
 FLAGS = flags.FLAGS
 # resume
 flags.DEFINE_bool('resume', False, 'resume from logdir')
 # model and training
-flags.DEFINE_enum('dataset', 'cifar10',
-                  ['cifar10', 'stl10', 'celebhq128'], "select dataset")
-flags.DEFINE_enum('arch', 'res32', gn_gan.generators.keys(), "architecture")
-flags.DEFINE_enum('norm', 'GN', ['GN', 'SN'], "normalization techniques")
+flags.DEFINE_enum('dataset', 'cifar10', datasets, "select dataset")
+flags.DEFINE_enum('arch', 'gn-res32', net_G_models.keys(), "architecture")
 flags.DEFINE_integer('total_steps', 200000, "total number of training steps")
 flags.DEFINE_integer('lr_decay_start', 0, 'apply linearly decay to lr')
 flags.DEFINE_integer('batch_size', 64, "batch size")
@@ -34,7 +58,6 @@ flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
-flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
 flags.DEFINE_float('cr', 0, "weight for consistency regularization")
 flags.DEFINE_integer('seed', 0, "random seed")
 # logging
@@ -52,15 +75,11 @@ device = torch.device('cuda:0')
 
 
 def generate():
-    if FLAGS.norm == 'GN':
-        Generator = gn_gan.generators[FLAGS.arch]
-        net_G = Generator(FLAGS.z_dim).to(device)
-    if FLAGS.norm == 'SN':
-        Generator = sn_gan.generators[FLAGS.arch]
-        net_G = Generator(FLAGS.z_dim).to(device)
+    net_G = net_G_models[FLAGS.arch]().to(device)
     net_G.load_state_dict(
         torch.load(os.path.join(FLAGS.logdir, 'model.pt'))['net_G'])
 
+    net_G.eval()
     images = generate_images(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
@@ -74,6 +93,7 @@ def generate():
 
 
 def evaluate(net_G):
+    net_G.eval()
     images = generate_images(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
@@ -111,22 +131,13 @@ def train():
         num_workers=FLAGS.num_workers, drop_last=True)
 
     # model
-    if FLAGS.norm == 'GN':
-        Generator = gn_gan.generators[FLAGS.arch]
-        Discriminator = gn_gan.discriminators[FLAGS.arch]
-        net_G = Generator(FLAGS.z_dim).to(device)
-        net_D = Discriminator().to(device)
+    net_G = net_G_models[FLAGS.arch]().to(device)
+    net_D = net_D_models[FLAGS.arch]().to(device)
+    if FLAGS.arch.startswith('gn'):
         net_D = gn_gan.GradNorm(net_D)
-        net_GD = gn_gan.GenDis(net_G, net_D)
-    if FLAGS.norm == 'SN':
-        Generator = sn_gan.generators[FLAGS.arch]
-        Discriminator = sn_gan.discriminators[FLAGS.arch]
-        net_G = Generator(FLAGS.z_dim).to(device)
-        net_D = Discriminator().to(device)
-        net_GD = sn_gan.GenDis(net_G, net_D)
 
     # loss
-    loss_fn = loss_fns[FLAGS.loss]()
+    loss_fn = HingeLoss()
 
     # optimizer
     optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
@@ -170,9 +181,6 @@ def train():
         writer.flush()
         start = 1
 
-    z = torch.randn(2 * FLAGS.batch_size, FLAGS.z_dim, requires_grad=False)
-    z = z.to(device)
-
     looper = infiniteloop(dataloader)
     with trange(start, FLAGS.total_steps + 1, dynamic_ncols=True,
                 initial=start - 1, total=FLAGS.total_steps) as pbar:
@@ -185,10 +193,12 @@ def train():
             # Discriminator
             net_D.train()
             for _ in range(FLAGS.n_dis):
-                real, _ = next(looper)
-                real = real.to(device)
-                z.normal_()
-                pred_real, pred_fake = net_GD(z[: FLAGS.batch_size], real)
+                with torch.no_grad():
+                    z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
+                    fake = net_G(z).detach()
+                real = next(looper).to(device)
+                pred_real = net_D(real)
+                pred_fake = net_D(fake)
                 loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
                 if FLAGS.cr > 0:
                     loss_cr = consistency_loss(net_D, real, pred_real)
@@ -221,9 +231,8 @@ def train():
 
             # Generator
             net_G.train()
-            z.normal_()
-            with module_no_grad(net_D):
-                loss = loss_fn(net_GD(z))
+            z = torch.randn(FLAGS.batch_size * 2, FLAGS.z_dim).to(device)
+            loss = loss_fn(net_D(net_G(z)))
             optim_G.zero_grad()
             loss.backward()
             optim_G.step()

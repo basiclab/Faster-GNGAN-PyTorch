@@ -402,20 +402,3 @@ class GenDis(nn.Module):
             fake = self.net_G(z)
             net_D_fake = self.net_D(fake)
             return net_D_fake
-
-
-generators = {
-    'cnn32': Generator32,
-    'cnn48': Generator48,
-    'res32': ResGenerator32,
-    'res48': ResGenerator48,
-    'res128': ResGenerator128,
-}
-
-discriminators = {
-    'cnn32': Discriminator32,
-    'cnn48': Discriminator48,
-    'res32': ResDiscriminator32,
-    'res48': ResDiscriminator48,
-    'res128': ResDiscriminator128,
-}
