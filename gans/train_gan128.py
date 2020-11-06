@@ -71,9 +71,9 @@ device = torch.device('cuda:0')
 
 
 def generate():
-    net_G = net_G_models[FLAGS.arch]().to(device)
+    net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
     net_G.load_state_dict(
-        torch.load(os.path.join(FLAGS.logdir, 'model.pt'))['net_G'])
+        torch.load(os.path.join(FLAGS.logdir, 'model.pt'))['ema_G'])
 
     images = images_generator(
         net_G=net_G,
@@ -104,8 +104,8 @@ def train():
         num_workers=FLAGS.num_workers, drop_last=True)
 
     # model
-    net_G = net_G_models[FLAGS.arch]().to(device)
-    ema_G = net_G_models[FLAGS.arch]().to(device)
+    net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
+    ema_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
     net_D = net_D_models[FLAGS.arch]().to(device)
     if FLAGS.arch.startswith('gn'):
         net_D = gn_gan.GradNorm(net_D)

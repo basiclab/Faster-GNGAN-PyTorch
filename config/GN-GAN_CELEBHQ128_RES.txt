@@ -13,7 +13,7 @@
 --logdir=./logs/GN-GAN_CELEBHQ128_RES_0
 --lr_decay_start=200000
 --n_dis=5
---num_images=10000
+--num_images=3000
 --num_workers=8
 --sample_size=64
 --sample_step=500
