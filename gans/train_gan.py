@@ -94,11 +94,12 @@ def generate():
     save_images(images, os.path.join(FLAGS.logdir, 'generate'))
     (IS, IS_std), FID = get_inception_and_fid_score(
         images, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch, verbose=True)
+    net_G.train()
     print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
 
 
 def evaluate(net_G):
-    net_G.eval()
+    net_G.eval()                # ????
     images = generate_images(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
@@ -108,6 +109,7 @@ def evaluate(net_G):
     (IS, IS_std), FID = get_inception_and_fid_score(
         images, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch)
     del images
+    net_G.train()               # ????
     return (IS, IS_std), FID
 
 
@@ -170,7 +172,6 @@ def train():
         os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
         writer = SummaryWriter(FLAGS.logdir)
         fixed_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
-        fixed_z = torch.split(fixed_z, FLAGS.batch_size, dim=0)
         with open(os.path.join(FLAGS.logdir, "flagfile.txt"), 'w') as f:
             f.write(FLAGS.flags_into_string())
         writer.add_text(
@@ -196,7 +197,6 @@ def train():
             loss_cr_sum = 0
 
             # Discriminator
-            net_D.train()
             for _ in range(FLAGS.n_dis):
                 with torch.no_grad():
                     z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
@@ -236,7 +236,6 @@ def train():
                 loss_fake='%.3f' % loss_fake)
 
             # Generator
-            net_G.train()
             z = torch.randn(FLAGS.batch_size * 2, FLAGS.z_dim).to(device)
             loss = loss_fn(net_D(net_G(z)))
             optim_G.zero_grad()
@@ -249,12 +248,9 @@ def train():
 
             # sample from fixed z
             if step == 1 or step % FLAGS.sample_step == 0:
-                fake_imgs = []
-                with torch.no_grad():
-                    for fixed_z_batch in fixed_z:
-                        fake = net_G(fixed_z_batch).cpu()
-                        fake_imgs.append((fake + 1) / 2)
-                    grid = make_grid(torch.cat(fake_imgs, dim=0))
+                # with torch.no_grad():     # ????
+                fake = net_G(fixed_z).cpu()
+                grid = (make_grid(fake) + 1) / 2
                 writer.add_image('sample', grid, step)
                 save_image(grid, os.path.join(
                     FLAGS.logdir, 'sample', '%d.png' % step))
