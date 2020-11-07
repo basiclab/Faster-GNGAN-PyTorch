@@ -7,6 +7,7 @@
 --eval_use_torch
 --fid_cache=./stats/stl10_unlabeled48.npz
 --logdir=./logs/SN-GAN-CR_STL10_CNN_0
+--loss=hinge
 --lr_decay_start=0
 --n_dis=1
 --num_images=50000

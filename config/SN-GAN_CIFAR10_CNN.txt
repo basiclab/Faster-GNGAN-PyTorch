@@ -7,6 +7,7 @@
 --eval_use_torch
 --fid_cache=./stats/cifar10_test.npz
 --logdir=./logs/SN-GAN_CIFAR10_CNN_0
+--loss=hinge
 --lr_decay_start=200000
 --n_dis=1
 --num_images=50000

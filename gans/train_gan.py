@@ -10,7 +10,7 @@ from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from models import gn_gan, sn_gan
-from common.losses import HingeLoss
+from common.losses import HingeLoss, BCEWithLogits
 from common.datasets import get_dataset
 from common.score.score import get_inception_and_fid_score
 from common.utils import generate_images, save_images, infiniteloop, set_seed
@@ -38,6 +38,11 @@ net_D_models = {
     'sn-res48': sn_gan.ResDiscriminator48,
 }
 
+loss_fns = {
+    'hinge': HingeLoss,
+    'bce': BCEWithLogits,
+}
+
 
 datasets = ['cifar10', 'stl10']
 
@@ -48,6 +53,7 @@ flags.DEFINE_bool('resume', False, 'resume from logdir')
 # model and training
 flags.DEFINE_enum('dataset', 'cifar10', datasets, "select dataset")
 flags.DEFINE_enum('arch', 'gn-res32', net_G_models.keys(), "architecture")
+flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
 flags.DEFINE_integer('total_steps', 200000, "total number of training steps")
 flags.DEFINE_integer('lr_decay_start', 0, 'apply linearly decay to lr')
 flags.DEFINE_integer('batch_size', 64, "batch size")
@@ -136,7 +142,7 @@ def train():
         net_D = gn_gan.GradNorm(net_D)
 
     # loss
-    loss_fn = HingeLoss()
+    loss_fn = loss_fns[FLAGS.loss]()
 
     # optimizer
     optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
