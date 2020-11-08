@@ -94,10 +94,9 @@ def get_activations(images, model, batch_size=50, use_torch=False,
     else:
         acts = np.empty((len(images), DIM))
 
-    if verbose:
-        iterator = trange(0, len(images), batch_size, dynamic_ncols=True)
-    else:
-        iterator = range(0, len(images), batch_size)
+    iterator = trange(
+        0, len(images), batch_size, dynamic_ncols=True, leave=False,
+        disable=not verbose, desc="get_activations")
 
     for start in iterator:
         end = start + batch_size

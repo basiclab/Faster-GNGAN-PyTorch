@@ -15,7 +15,9 @@ def generate_images(net_G, z_dim, n_classes=None, num_images=10000,
                     batch_size=64, verbose=False):
     all_images = None
     with torch.no_grad():
-        for start in trange(0, num_images, batch_size, disable=(not verbose)):
+        for start in trange(0, num_images, batch_size, dynamic_ncols=True,
+                            leave=False, disable=(not verbose),
+                            desc="generate_images"):
             batch_size = min(batch_size, num_images - start)
             z = torch.randn(batch_size, z_dim).to(device)
             # condition or unconditional
@@ -52,7 +54,8 @@ def images_generator(net_G, z_dim, n_classes=None, num_images=50000,
 
 def save_images(images, output_dir, verbose=False):
     os.makedirs(output_dir, exist_ok=True)
-    for i, image in enumerate(tqdm(images, disable=(not verbose))):
+    for i, image in enumerate(tqdm(images, dynamic_ncols=True, leave=False,
+                                   disable=(not verbose), desc="save_images")):
         save_image(torch.tensor(image), os.path.join(output_dir, '%d.png' % i))
 
 
