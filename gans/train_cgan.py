@@ -13,7 +13,7 @@ from common.losses import HingeLoss
 from common.datasets import get_dataset
 from common.score.score import get_inception_and_fid_score
 from common.utils import (
-    ema, images_generator, save_images, module_no_grad, infiniteloop, set_seed)
+    ema, generate_images, save_images, module_no_grad, infiniteloop, set_seed)
 
 
 net_G_models = {
@@ -83,19 +83,20 @@ def generate():
         torch.load(os.path.join(FLAGS.logdir, 'model.pt'))['ema_G'])
 
     net_G.eval()
-    images = images_generator(
+    images = generate_images(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
         n_classes=FLAGS.n_classes,
         num_images=FLAGS.num_images,
-        batch_size=FLAGS.G_batch_size)
+        batch_size=FLAGS.G_batch_size,
+        verbose=True)
     save_images(
         images, os.path.join(FLAGS.logdir, 'generate'), verbose=True)
 
 
 def evaluate(net_G):
     net_G.eval()
-    images = images_generator(
+    images = generate_images(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
         n_classes=FLAGS.n_classes,
@@ -103,7 +104,7 @@ def evaluate(net_G):
         batch_size=FLAGS.G_batch_size)
     (IS, IS_std), FID = get_inception_and_fid_score(
         images, FLAGS.fid_cache, num_images=FLAGS.num_images,
-        use_torch=FLAGS.eval_use_torch)
+        use_torch=FLAGS.eval_use_torch, verbose=True)
     del images
     net_G.train()
     return (IS, IS_std), FID

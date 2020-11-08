@@ -107,7 +107,7 @@ def evaluate(net_G):
         batch_size=FLAGS.G_batch_size)
     (IS, IS_std), FID = get_inception_and_fid_score(
         images, FLAGS.fid_cache, num_images=FLAGS.num_images,
-        use_torch=FLAGS.eval_use_torch)
+        use_torch=FLAGS.eval_use_torch, verbose=True)
     del images
     net_G.train()
     return (IS, IS_std), FID
