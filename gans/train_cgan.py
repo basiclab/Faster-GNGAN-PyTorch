@@ -95,12 +95,13 @@ def generate():
 
 
 def evaluate(net_G):
-    images = images_generator(
+    images = generate_images(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
         n_classes=FLAGS.n_classes,
         num_images=FLAGS.num_images,
-        batch_size=FLAGS.G_batch_size)
+        batch_size=FLAGS.G_batch_size,
+        verbose=True)
     (IS, IS_std), FID = get_inception_and_fid_score(
         images, FLAGS.fid_cache, num_images=FLAGS.num_images,
         use_torch=FLAGS.eval_use_torch, verbose=True)
