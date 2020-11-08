@@ -94,7 +94,6 @@ def generate():
 
 
 def evaluate(net_G):
-    net_G.eval()
     images = images_generator(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
@@ -105,7 +104,6 @@ def evaluate(net_G):
         images, FLAGS.fid_cache, num_images=FLAGS.num_images,
         use_torch=FLAGS.eval_use_torch)
     del images
-    net_G.train()
     return (IS, IS_std), FID
 
 
