@@ -51,8 +51,8 @@ flags.DEFINE_integer('ch', 64, 'base channel size of BigGAN')
 flags.DEFINE_integer('n_classes', 10, 'the number of classes in dataset')
 flags.DEFINE_integer('total_steps', 125000, "total number of training steps")
 flags.DEFINE_integer('lr_decay_start', 0, 'apply linearly decay to lr')
-flags.DEFINE_integer('G_batch_size', 64, "batch size")
-flags.DEFINE_integer('D_batch_size', 64, "batch size")
+flags.DEFINE_integer('G_batch_size', 50, "batch size")
+flags.DEFINE_integer('D_batch_size', 50, "batch size")
 flags.DEFINE_integer('num_workers', 8, "dataloader workers")
 flags.DEFINE_float('G_lr', 1e-4, "Generator learning rate")
 flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
@@ -88,29 +88,31 @@ def generate():
         z_dim=FLAGS.z_dim,
         n_classes=FLAGS.n_classes,
         num_images=FLAGS.num_images,
-        batch_size=FLAGS.batch_size)
+        batch_size=FLAGS.G_batch_size)
     save_images(
         images, os.path.join(FLAGS.logdir, 'generate'), verbose=True)
 
 
 def evaluate(net_G):
+    net_G.eval()
     images = images_generator(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
         n_classes=FLAGS.n_classes,
         num_images=FLAGS.num_images,
-        batch_size=FLAGS.batch_size)
+        batch_size=FLAGS.G_batch_size)
     (IS, IS_std), FID = get_inception_and_fid_score(
         images, FLAGS.fid_cache, num_images=FLAGS.num_images,
         use_torch=FLAGS.eval_use_torch)
     del images
+    net_G.train()
     return (IS, IS_std), FID
 
 
 def train():
     dataset = get_dataset(FLAGS.dataset)
     dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=FLAGS.batch_size, shuffle=True,
+        dataset, batch_size=FLAGS.D_batch_size, shuffle=True,
         num_workers=FLAGS.num_workers, drop_last=True)
 
     # model
@@ -160,10 +162,10 @@ def train():
         writer = SummaryWriter(FLAGS.logdir)
         writer_ema = SummaryWriter(FLAGS.logdir + "_ema")
         fixed_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
-        fixed_z = torch.split(fixed_z, FLAGS.batch_size, dim=0)
+        fixed_z = torch.split(fixed_z, FLAGS.G_batch_size, dim=0)
         fixed_y = torch.randint(
             FLAGS.n_classes, (FLAGS.sample_size,)).to(device)
-        fixed_y = torch.split(fixed_y, FLAGS.batch_size, dim=0)
+        fixed_y = torch.split(fixed_y, FLAGS.G_batch_size, dim=0)
         with open(os.path.join(FLAGS.logdir, "flagfile.txt"), 'w') as f:
             f.write(FLAGS.flags_into_string())
         writer.add_text(
@@ -173,7 +175,7 @@ def train():
         real = []
         for x, _ in dataloader:
             real.append(x)
-            if len(real) * FLAGS.batch_size >= FLAGS.sample_size:
+            if len(real) * x.shape[0] >= FLAGS.sample_size:
                 real = torch.cat(real, dim=0)[:FLAGS.sample_size]
                 break
         grid = (make_grid(real) + 1) / 2
@@ -188,16 +190,17 @@ def train():
             loss_sum = 0
             loss_real_sum = 0
             loss_fake_sum = 0
+            net_D.train()
+            net_G.train()
 
             # Discriminator
-            net_D.train()
             for _ in range(FLAGS.n_dis):
                 x_real, y_real = next(looper)
                 x_real, y_real = x_real.to(device), y_real.to(device)
                 z = torch.randn(
                     FLAGS.D_batch_size, FLAGS.z_dim, device=device)
                 y = torch.randint(
-                    FLAGS.n_classes, (FLAGS.D_batch_size), device=device)
+                    FLAGS.n_classes, (FLAGS.D_batch_size,), device=device)
                 pred_real, pred_fake = net_GD(z, y, x_real, y_real)
                 loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
                 optim_D.zero_grad()
@@ -221,11 +224,10 @@ def train():
                 loss_fake='%.3f' % loss_fake)
 
             # Generator
-            net_G.train()
             z = torch.randn(
                 FLAGS.G_batch_size, FLAGS.z_dim, device=device)
             y = torch.randint(
-                FLAGS.n_classes, (FLAGS.G_batch_size), device=device)
+                FLAGS.n_classes, (FLAGS.G_batch_size,), device=device)
             with module_no_grad(net_D):
                 loss = loss_fn(net_GD(z, y))
             optim_G.zero_grad()

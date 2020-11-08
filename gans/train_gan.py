@@ -9,7 +9,7 @@ from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
-from models import gn_gan, sn_gan
+from models import gn_gan, sn_gan, sn_gan_1
 from common.losses import HingeLoss, BCEWithLogits
 from common.datasets import get_dataset
 from common.score.score import get_inception_and_fid_score
@@ -25,6 +25,8 @@ net_G_models = {
     'sn-cnn48': sn_gan.Generator48,
     'sn-res32': sn_gan.ResGenerator32,
     'sn-res48': sn_gan.ResGenerator48,
+    'sn-cnn32-1': sn_gan_1.Generator32,
+    'sn-res32-1': sn_gan_1.ResGenerator32,
 }
 
 net_D_models = {
@@ -36,6 +38,8 @@ net_D_models = {
     'sn-cnn48': sn_gan.Discriminator48,
     'sn-res32': sn_gan.ResDiscriminator32,
     'sn-res48': sn_gan.ResDiscriminator48,
+    'sn-cnn32-1': sn_gan_1.Discriminator32,
+    'sn-res32-1': sn_gan_1.ResDiscriminator32,
 }
 
 loss_fns = {

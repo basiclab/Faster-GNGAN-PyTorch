@@ -79,7 +79,7 @@ def generate():
         net_G=net_G,
         z_dim=FLAGS.z_dim,
         num_images=FLAGS.num_images,
-        batch_size=FLAGS.batch_size)
+        batch_size=FLAGS.G_batch_size)
     save_images(
         images, os.path.join(FLAGS.logdir, 'generate'), verbose=True)
 
