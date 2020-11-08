@@ -40,10 +40,10 @@ def get_inception_and_fid_score(images, fid_cache, num_images=None,
         fid_acts = np.empty((num_images, 2048))
         is_probs = np.empty((num_images, 1008))
 
-    if verbose:
-        iterator = iter(tqdm(images, total=num_images, dynamic_ncols=True))
-    else:
-        iterator = iter(images)
+    iterator = iter(tqdm(
+        images, total=num_images,
+        dynamic_ncols=True, leave=False, disable=not verbose,
+        desc="get_inception_and_fid_score"))
 
     start = 0
     while True:

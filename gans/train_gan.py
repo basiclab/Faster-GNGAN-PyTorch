@@ -111,7 +111,7 @@ def evaluate(net_G):
         batch_size=FLAGS.batch_size,
         verbose=False)
     (IS, IS_std), FID = get_inception_and_fid_score(
-        images, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch)
+        images, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch, verbose=True)
     del images
     net_G.train()               # ????
     return (IS, IS_std), FID
@@ -241,10 +241,17 @@ def train():
 
             # Generator
             z = torch.randn(FLAGS.batch_size * 2, FLAGS.z_dim).to(device)
-            loss = loss_fn(net_D(net_G(z)))
+            x = net_G(z)
+            x.retain_grad()
+            loss = loss_fn(net_D(x))
+
             optim_G.zero_grad()
             loss.backward()
             optim_G.step()
+
+            avg_grad_norm = torch.norm(torch.flatten(
+                (x.grad * x.shape[0]), start_dim=1), p=2, dim=1).mean()
+            writer.add_scalar('avg_grad_norm', avg_grad_norm, step)
 
             # scheduler
             sched_G.step()
