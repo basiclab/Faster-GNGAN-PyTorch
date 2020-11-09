@@ -18,10 +18,10 @@ def get_inception_score(images, splits=10, batch_size=32, use_torch=False,
         model = torch.nn.DataParallel(model)
 
     preds = []
-    if verbose:
-        iterator = trange(0, len(images), batch_size, dynamic_ncols=True)
-    else:
-        iterator = range(0, len(images), batch_size)
+    iterator = trange(
+        0, len(images), batch_size, dynamic_ncols=True, leave=False,
+        disable=not verbose, desc="get_inception_score")
+
     for start in iterator:
         end = start + batch_size
         batch_images = images[start: end]

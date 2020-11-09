@@ -1,5 +1,18 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+class BCEWithLogits(nn.BCEWithLogitsLoss):
+    def forward(self, pred_real, pred_fake=None):
+        if pred_fake is not None:
+            loss_real = super().forward(pred_real, torch.ones_like(pred_real))
+            loss_fake = super().forward(pred_fake, torch.zeros_like(pred_fake))
+            loss = loss_real + loss_fake
+            return loss, loss_real, loss_fake
+        else:
+            loss = super().forward(pred_real, torch.ones_like(pred_real))
+            return loss
 
 
 class HingeLoss(nn.Module):
@@ -12,3 +25,9 @@ class HingeLoss(nn.Module):
         else:
             loss = -pred_real.mean()
             return loss
+
+
+loss_fns = {
+    'bce': BCEWithLogits,
+    'hinge': HingeLoss,
+}

@@ -9,8 +9,8 @@ from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
-from models import gn_gan, sn_gan
-from common.losses import HingeLoss
+from models import gn_gan, sn_gan, sn_gan_1
+from common.losses import HingeLoss, BCEWithLogits
 from common.datasets import get_dataset
 from common.score.score import get_inception_and_fid_score
 from common.utils import generate_images, save_images, infiniteloop, set_seed
@@ -25,6 +25,8 @@ net_G_models = {
     'sn-cnn48': sn_gan.Generator48,
     'sn-res32': sn_gan.ResGenerator32,
     'sn-res48': sn_gan.ResGenerator48,
+    'sn-cnn32-1': sn_gan_1.Generator32,
+    'sn-res32-1': sn_gan_1.ResGenerator32,
 }
 
 net_D_models = {
@@ -36,6 +38,13 @@ net_D_models = {
     'sn-cnn48': sn_gan.Discriminator48,
     'sn-res32': sn_gan.ResDiscriminator32,
     'sn-res48': sn_gan.ResDiscriminator48,
+    'sn-cnn32-1': sn_gan_1.Discriminator32,
+    'sn-res32-1': sn_gan_1.ResDiscriminator32,
+}
+
+loss_fns = {
+    'hinge': HingeLoss,
+    'bce': BCEWithLogits,
 }
 
 
@@ -48,6 +57,7 @@ flags.DEFINE_bool('resume', False, 'resume from logdir')
 # model and training
 flags.DEFINE_enum('dataset', 'cifar10', datasets, "select dataset")
 flags.DEFINE_enum('arch', 'gn-res32', net_G_models.keys(), "architecture")
+flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
 flags.DEFINE_integer('total_steps', 200000, "total number of training steps")
 flags.DEFINE_integer('lr_decay_start', 0, 'apply linearly decay to lr')
 flags.DEFINE_integer('batch_size', 64, "batch size")
@@ -88,11 +98,12 @@ def generate():
     save_images(images, os.path.join(FLAGS.logdir, 'generate'))
     (IS, IS_std), FID = get_inception_and_fid_score(
         images, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch, verbose=True)
+    net_G.train()
     print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
 
 
 def evaluate(net_G):
-    net_G.eval()
+    net_G.eval()                # ????
     images = generate_images(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
@@ -100,8 +111,9 @@ def evaluate(net_G):
         batch_size=FLAGS.batch_size,
         verbose=False)
     (IS, IS_std), FID = get_inception_and_fid_score(
-        images, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch)
+        images, FLAGS.fid_cache, use_torch=FLAGS.eval_use_torch, verbose=True)
     del images
+    net_G.train()               # ????
     return (IS, IS_std), FID
 
 
@@ -136,7 +148,7 @@ def train():
         net_D = gn_gan.GradNorm(net_D)
 
     # loss
-    loss_fn = HingeLoss()
+    loss_fn = loss_fns[FLAGS.loss]()
 
     # optimizer
     optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
@@ -164,7 +176,6 @@ def train():
         os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
         writer = SummaryWriter(FLAGS.logdir)
         fixed_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
-        fixed_z = torch.split(fixed_z, FLAGS.batch_size, dim=0)
         with open(os.path.join(FLAGS.logdir, "flagfile.txt"), 'w') as f:
             f.write(FLAGS.flags_into_string())
         writer.add_text(
@@ -190,7 +201,6 @@ def train():
             loss_cr_sum = 0
 
             # Discriminator
-            net_D.train()
             for _ in range(FLAGS.n_dis):
                 with torch.no_grad():
                     z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
@@ -230,12 +240,18 @@ def train():
                 loss_fake='%.3f' % loss_fake)
 
             # Generator
-            net_G.train()
             z = torch.randn(FLAGS.batch_size * 2, FLAGS.z_dim).to(device)
-            loss = loss_fn(net_D(net_G(z)))
+            x = net_G(z)
+            x.retain_grad()
+            loss = loss_fn(net_D(x))
+
             optim_G.zero_grad()
             loss.backward()
             optim_G.step()
+
+            avg_grad_norm = torch.norm(torch.flatten(
+                (x.grad * x.shape[0]), start_dim=1), p=2, dim=1).mean()
+            writer.add_scalar('avg_grad_norm', avg_grad_norm, step)
 
             # scheduler
             sched_G.step()
@@ -243,12 +259,9 @@ def train():
 
             # sample from fixed z
             if step == 1 or step % FLAGS.sample_step == 0:
-                fake_imgs = []
-                with torch.no_grad():
-                    for fixed_z_batch in fixed_z:
-                        fake = net_G(fixed_z_batch).cpu()
-                        fake_imgs.append((fake + 1) / 2)
-                    grid = make_grid(torch.cat(fake_imgs, dim=0))
+                # with torch.no_grad():     # ????
+                fake = net_G(fixed_z).cpu()
+                grid = (make_grid(fake) + 1) / 2
                 writer.add_image('sample', grid, step)
                 save_image(grid, os.path.join(
                     FLAGS.logdir, 'sample', '%d.png' % step))

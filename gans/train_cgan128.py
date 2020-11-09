@@ -92,29 +92,31 @@ def generate():
         z_dim=FLAGS.z_dim,
         n_classes=FLAGS.n_classes,
         num_images=FLAGS.num_images,
-        batch_size=FLAGS.batch_size)
+        batch_size=FLAGS.G_batch_size)
     save_images(
         images, os.path.join(FLAGS.logdir, 'generate'), verbose=True)
 
 
 def evaluate(net_G):
+    net_G.eval()
     images = images_generator(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
         n_classes=FLAGS.n_classes,
         num_images=FLAGS.num_images,
-        batch_size=FLAGS.batch_size)
+        batch_size=FLAGS.G_batch_size)
     (IS, IS_std), FID = get_inception_and_fid_score(
         images, FLAGS.fid_cache, num_images=FLAGS.num_images,
-        use_torch=FLAGS.eval_use_torch)
+        use_torch=FLAGS.eval_use_torch, verbose=True)
     del images
+    net_G.train()
     return (IS, IS_std), FID
 
 
 def train():
     dataset = get_dataset(FLAGS.dataset)
     dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=FLAGS.batch_size, shuffle=True,
+        dataset, batch_size=FLAGS.D_batch_size, shuffle=True,
         num_workers=FLAGS.num_workers, drop_last=True)
 
     # model
@@ -166,10 +168,10 @@ def train():
         writer = SummaryWriter(FLAGS.logdir)
         writer_ema = SummaryWriter(FLAGS.logdir + "_ema")
         fixed_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
-        fixed_z = torch.split(fixed_z, FLAGS.batch_size, dim=0)
+        fixed_z = torch.split(fixed_z, FLAGS.G_batch_size, dim=0)
         fixed_y = torch.randint(
             FLAGS.n_classes, (FLAGS.sample_size,)).to(device)
-        fixed_y = torch.split(fixed_y, FLAGS.batch_size, dim=0)
+        fixed_y = torch.split(fixed_y, FLAGS.G_batch_size, dim=0)
         with open(os.path.join(FLAGS.logdir, "flagfile.txt"), 'w') as f:
             f.write(FLAGS.flags_into_string())
         writer.add_text(
@@ -179,7 +181,7 @@ def train():
         real = []
         for x, _ in dataloader:
             real.append(x)
-            if len(real) * FLAGS.batch_size >= FLAGS.sample_size:
+            if len(real) * x.shape[0] >= FLAGS.sample_size:
                 real = torch.cat(real, dim=0)[:FLAGS.sample_size]
                 break
         grid = (make_grid(real) + 1) / 2
@@ -202,9 +204,10 @@ def train():
             loss_sum = 0
             loss_real_sum = 0
             loss_fake_sum = 0
+            net_D.train()
+            net_G.train()
 
             # Discriminator
-            net_D.train()
             for _ in range(FLAGS.n_dis):
                 optim_D.zero_grad()
                 for _ in range(FLAGS.D_accumulation):
@@ -237,7 +240,6 @@ def train():
                 loss_fake='%.3f' % loss_fake)
 
             # Generator
-            net_G.train()
             optim_G.zero_grad()
             for _ in range(FLAGS.G_accumulation):
                 z = torch.randn(
