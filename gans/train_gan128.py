@@ -31,7 +31,10 @@ net_GD_models = {
     'sn-res128': sn_gan.GenDis,
 }
 
-datasets = ['celebhq128', 'celebhq128.hdf5', 'imagenet128', 'imagenet128.hdf5']
+datasets = [
+    'imagenet128', 'imagenet128.hdf5',
+    'celebhq128', 'celebhq128.hdf5',
+    'lsun_church_outdoor', 'lsun_church_outdoor.hdf5',]
 
 
 FLAGS = flags.FLAGS
