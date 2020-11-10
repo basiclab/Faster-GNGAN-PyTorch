@@ -20,13 +20,13 @@ from tqdm import tqdm
 # 5000 / None               |81/s            |          |        |
 # auto:(125,1,16,32) / None |11/s            |          |61GB    |
 class ImageNetHDF5(Dataset):
-    def __init__(self, root, transform=None,
+    def __init__(self, transform=None,
                  cache='./data', chunk_size=500, size=128, in_memory=False):
         self.transform = transform
         self.in_memory = in_memory
         self.h5_path = os.path.join(cache, 'imagenet%d.hdf5' % size)
         if not os.path.isfile(self.h5_path):
-            self.create_hdf5(root, self.h5_path, chunk_size, size)
+            self.create_hdf5(self.h5_path, chunk_size, size)
 
         if in_memory:
             with h5.File(self.h5_path, 'r') as f:
@@ -36,7 +36,7 @@ class ImageNetHDF5(Dataset):
         else:
             self.num_images = len(h5.File(self.h5_path, 'r')['labels'])
 
-    def create_hdf5(self, root, h5_path, chunk_size, size):
+    def create_hdf5(self, h5_path, chunk_size, size):
         dataloader = DataLoader(
             dataset=get_dataset('imagenet128'), batch_size=50, num_workers=8)
         os.makedirs(os.path.dirname(h5_path), exist_ok=True)
