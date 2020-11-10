@@ -1,5 +1,6 @@
 import os
 import json
+import math
 
 import torch
 import torch.optim as optim
@@ -197,6 +198,7 @@ def train():
         G_size += param.data.nelement()
     print('D params: %d, G params: %d' % (D_size, G_size))
 
+    best_IS, best_FID = 0, 999
     looper = infiniteloop(dataloader)
     with trange(start, FLAGS.total_steps + 1, dynamic_ncols=True,
                 initial=start - 1, total=FLAGS.total_steps) as pbar:
@@ -216,7 +218,7 @@ def train():
                     z = torch.randn(
                         FLAGS.D_batch_size, FLAGS.z_dim, device=device)
                     y = torch.randint(
-                        FLAGS.n_classes, (FLAGS.D_batch_size), device=device)
+                        FLAGS.n_classes, (FLAGS.D_batch_size,), device=device)
                     pred_real, pred_fake = net_GD(z, y, x_real, y_real)
                     loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
                     loss = loss / float(FLAGS.D_accumulation)
@@ -245,7 +247,7 @@ def train():
                 z = torch.randn(
                     FLAGS.G_batch_size, FLAGS.z_dim, device=device)
                 y = torch.randint(
-                    FLAGS.n_classes, (FLAGS.G_batch_size), device=device)
+                    FLAGS.n_classes, (FLAGS.G_batch_size,), device=device)
                 with module_no_grad(net_D):
                     loss = loss_fn(net_GD(z, y))
                 loss = loss / float(FLAGS.G_accumulation)
@@ -298,6 +300,15 @@ def train():
                 (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(eval_ema_G)
                 (net_G_IS, net_G_IS_std), net_G_FID = evaluate(net_G)
                 (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(ema_G)
+                if not math.isnan(best_FID) and not math.isnan(ema_G_FID):
+                    save_as_best = (ema_G_FID < best_FID)
+                else:
+                    save_as_best = (ema_G_IS > best_IS)
+                if save_as_best:
+                    best_IS = ema_G_IS
+                    best_FID = ema_G_FID
+                    torch.save(
+                        ckpt, os.path.join(FLAGS.logdir, 'best_model.pt'))
                 pbar.write(
                     "%6d/%6d "
                     "IS:%6.3f(%.3f), FID:%7.3f, "

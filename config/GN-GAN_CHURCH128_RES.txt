@@ -10,7 +10,7 @@
 --eval_step=2000
 --eval_use_torch
 --fid_cache=./stats/lsun_church_outdoor_train128.npz
---logdir=./logs/GN-GAN_CHURCH128_RES_bs256_0
+--logdir=./logs/GN-GAN_CHURCH128_RES_0
 --lr_decay_start=200000
 --n_dis=5
 --num_images=10000

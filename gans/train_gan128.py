@@ -1,5 +1,6 @@
 import os
 import json
+import math
 
 import torch
 import torch.optim as optim
@@ -179,6 +180,7 @@ def train():
     z = torch.randn(2 * FLAGS.batch_size, FLAGS.z_dim, requires_grad=False)
     z = z.to(device)
 
+    best_IS, best_FID = 0, 999
     looper = infiniteloop(dataloader)
     with trange(start, FLAGS.total_steps + 1, dynamic_ncols=True,
                 initial=start - 1, total=FLAGS.total_steps) as pbar:
@@ -272,6 +274,15 @@ def train():
                     eval_ema_G = ema_G
                 (net_G_IS, net_G_IS_std), net_G_FID = evaluate(eval_net_G)
                 (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(eval_ema_G)
+                if not math.isnan(best_FID) and not math.isnan(ema_G_FID):
+                    save_as_best = (ema_G_FID < best_FID)
+                else:
+                    save_as_best = (ema_G_IS > best_IS)
+                if save_as_best:
+                    best_IS = ema_G_IS
+                    best_FID = ema_G_FID
+                    torch.save(
+                        ckpt, os.path.join(FLAGS.logdir, 'best_model.pt'))
                 pbar.write(
                     "%6d/%6d "
                     "IS:%6.3f(%.3f), FID:%7.3f, "
