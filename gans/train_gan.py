@@ -259,12 +259,12 @@ def train():
 
             # sample from fixed z
             if step == 1 or step % FLAGS.sample_step == 0:
-                # with torch.no_grad():     # ????
-                fake = net_G(fixed_z).cpu()
-                grid = (make_grid(fake) + 1) / 2
-                writer.add_image('sample', grid, step)
-                save_image(grid, os.path.join(
-                    FLAGS.logdir, 'sample', '%d.png' % step))
+                with torch.no_grad():
+                    fake = net_G(fixed_z).cpu()
+                    grid = (make_grid(fake) + 1) / 2
+                    writer.add_image('sample', grid, step)
+                    save_image(grid, os.path.join(
+                        FLAGS.logdir, 'sample', '%d.png' % step))
 
             # evaluate IS, FID and save model
             if step == 1 or step % FLAGS.eval_step == 0:

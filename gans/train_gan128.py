@@ -76,14 +76,18 @@ device = torch.device('cuda:0')
 
 def generate():
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
-    net_G.load_state_dict(
-        torch.load(os.path.join(FLAGS.logdir, 'model.pt'))['ema_G'])
+    if os.path.isfile(os.path.join(FLAGS.logdir, 'best_model.pt')):
+        ckpt = torch.load(os.path.join(FLAGS.logdir, 'best_model.pt'))
+    else:
+        ckpt = torch.load(os.path.join(FLAGS.logdir, 'model.pt'))
+
+    net_G.load_state_dict(ckpt['ema_G'])
 
     images = images_generator(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
         num_images=FLAGS.num_images,
-        batch_size=FLAGS.G_batch_size)
+        batch_size=FLAGS.batch_size)
     save_images(
         images, os.path.join(FLAGS.logdir, 'generate'), verbose=True)
 
