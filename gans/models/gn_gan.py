@@ -174,6 +174,8 @@ class ResGenerator32(nn.Module):
         self.initialize()
 
     def initialize(self):
+        init.kaiming_normal_(self.linear.weight)
+        init.zeros_(self.linear.bias)
         for m in self.output.modules():
             if isinstance(m, nn.Conv2d):
                 init.kaiming_normal_(m.weight)
@@ -204,6 +206,8 @@ class ResGenerator48(nn.Module):
         self.initialize()
 
     def initialize(self):
+        init.kaiming_normal_(self.linear.weight)
+        init.zeros_(self.linear.bias)
         for m in self.output.modules():
             if isinstance(m, nn.Conv2d):
                 init.kaiming_normal_(m.weight)
@@ -237,6 +241,8 @@ class ResGenerator128(nn.Module):
         self.initialize()
 
     def initialize(self):
+        init.kaiming_normal_(self.linear.weight)
+        init.zeros_(self.linear.bias)
         for m in self.output.modules():
             if isinstance(m, nn.Conv2d):
                 init.kaiming_normal_(m.weight)
@@ -319,6 +325,12 @@ class ResDiscriminator32(nn.Module):
             nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 1)))
         self.linear = nn.Linear(128, 1)
+        # initialize weight
+        self.initialize()
+
+    def initialize(self):
+        init.kaiming_normal_(self.linear.weight)
+        init.zeros_(self.linear.bias)
 
     def forward(self, x):
         x = self.model(x)
@@ -338,6 +350,12 @@ class ResDiscriminator48(nn.Module):
             nn.ReLU(inplace=True),
             nn.AdaptiveAvgPool2d((1, 1)))
         self.linear = nn.Linear(512, 1)
+        # initialize weight
+        self.initialize()
+
+    def initialize(self):
+        init.kaiming_normal_(self.linear.weight)
+        init.zeros_(self.linear.bias)
 
     def forward(self, x):
         x = self.model(x)
@@ -359,6 +377,12 @@ class ResDiscriminator128(nn.Module):
             nn.ReLU(inplace=True),
             nn.AdaptiveAvgPool2d((1, 1)))
         self.linear = nn.Linear(1024, 1)
+        # initialize weight
+        self.initialize()
+
+    def initialize(self):
+        init.kaiming_normal_(self.linear.weight)
+        init.zeros_(self.linear.bias)
 
     def forward(self, x):
         x = self.model(x)
