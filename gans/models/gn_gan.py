@@ -46,7 +46,7 @@ class Generator(nn.Module):
             nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(True),
-            nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1),
+            nn.ConvTranspose2d(64, 3, kernel_size=3, stride=1, padding=1),
             nn.Tanh())
         self.initialize()
 
