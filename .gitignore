@@ -26,4 +26,5 @@ _cache_*
 
 # test scripts
 *.py
+*.sh
 !*/**/*.py
