@@ -4,6 +4,7 @@ import json
 import torch
 import torch.optim as optim
 from absl import flags, app
+from torchvision import transforms
 from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
@@ -59,6 +60,7 @@ flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.999], "for Adam")
 flags.DEFINE_integer('n_dis', 4, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
+flags.DEFINE_float('cr', 0, "weight for consistency regularization")
 flags.DEFINE_integer('seed', 0, "random seed")
 # ema
 flags.DEFINE_float('ema_decay', 0.9999, "ema decay rate")
@@ -79,10 +81,10 @@ device = torch.device('cuda:0')
 
 def generate():
     net_G = net_G_models[FLAGS.arch](FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim)
+    net_G = net_G.to(device)
     net_G.load_state_dict(
         torch.load(os.path.join(FLAGS.logdir, 'model.pt'))['ema_G'])
 
-    net_G.eval()
     images = generate_images(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
@@ -107,6 +109,24 @@ def evaluate(net_G):
         use_torch=FLAGS.eval_use_torch, verbose=True)
     del images
     return (IS, IS_std), FID
+
+
+def consistency_loss(net_D, real, pred_real):
+    consistency_transforms = transforms.Compose([
+        transforms.Lambda(lambda x: (x + 1) / 2),
+        transforms.ToPILImage(mode='RGB'),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomAffine(0, translate=(0.2, 0.2)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    ])
+
+    aug_real = real.detach().clone().cpu()
+    for idx, img in enumerate(aug_real):
+        aug_real[idx] = consistency_transforms(img)
+    aug_real = aug_real.to(device)
+    loss = ((net_D(aug_real) - pred_real) ** 2).mean()
+    return loss
 
 
 def train():
@@ -190,6 +210,7 @@ def train():
             loss_sum = 0
             loss_real_sum = 0
             loss_fake_sum = 0
+            loss_cr_sum = 0
             net_D.train()
             net_G.train()
 
@@ -203,21 +224,30 @@ def train():
                     FLAGS.n_classes, (FLAGS.D_batch_size,), device=device)
                 pred_real, pred_fake = net_GD(z, y, x_real, y_real)
                 loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
+                if FLAGS.cr > 0:
+                    loss_cr = consistency_loss(net_D, real, pred_real)
+                else:
+                    loss_cr = torch.tensor(0.)
+                loss_all = loss + FLAGS.cr * loss_cr
+
                 optim_D.zero_grad()
-                loss.backward()
+                loss_all.backward()
                 optim_D.step()
 
                 loss_sum += loss.cpu().item()
                 loss_real_sum += loss_real.cpu().item()
                 loss_fake_sum += loss_fake.cpu().item()
+                loss_cr_sum += loss_cr.cpu().item()
 
             loss = loss_sum / FLAGS.n_dis
             loss_real = loss_real_sum / FLAGS.n_dis
             loss_fake = loss_fake_sum / FLAGS.n_dis
+            loss_cr = loss_cr_sum / FLAGS.n_dis
 
             writer.add_scalar('loss', loss, step)
             writer.add_scalar('loss_real', loss_real, step)
             writer.add_scalar('loss_fake', loss_fake, step)
+            writer.add_scalar('loss_cr', loss_cr, step)
 
             pbar.set_postfix(
                 loss_real='%.3f' % loss_real,

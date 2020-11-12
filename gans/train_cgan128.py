@@ -84,6 +84,7 @@ device = torch.device('cuda:0')
 
 def generate():
     net_G = net_G_models[FLAGS.arch](FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim)
+    net_G = net_G.to(device)
     net_G.load_state_dict(
         torch.load(os.path.join(FLAGS.logdir, 'model.pt'))['ema_G'])
 
