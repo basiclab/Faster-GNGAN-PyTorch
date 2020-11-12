@@ -161,6 +161,7 @@ def train():
         fixed_z = ckpt['fixed_z']
         fixed_y = ckpt['fixed_y']
         start = ckpt['step'] + 1
+        best_IS, best_FID = ckpt['best_ID'], ckpt['best_FID']
         writer = SummaryWriter(FLAGS.logdir)
         writer_ema = SummaryWriter(FLAGS.logdir + "_ema")
         del ckpt
@@ -178,7 +179,6 @@ def train():
             f.write(FLAGS.flags_into_string())
         writer.add_text(
             "flagfile", FLAGS.flags_into_string().replace('\n', '  \n'))
-
         # sample real data
         real = []
         for x, _ in dataloader:
@@ -189,7 +189,9 @@ def train():
         grid = (make_grid(real) + 1) / 2
         writer.add_image('real_sample', grid)
         writer.flush()
+        # start value
         start = 1
+        best_IS, best_FID = 0, 999
 
     D_size = 0
     for param in net_D.parameters():
@@ -278,6 +280,21 @@ def train():
                     FLAGS.logdir, 'sample', '%d.png' % step))
 
             if step == 1 or step % FLAGS.eval_step == 0:
+                if FLAGS.parallel:
+                    eval_net_G = torch.nn.DataParallel(net_G)
+                    eval_ema_G = torch.nn.DataParallel(ema_G)
+                else:
+                    eval_net_G = net_G
+                    eval_ema_G = ema_G
+                (net_G_IS, net_G_IS_std), net_G_FID = evaluate(eval_net_G)
+                (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(eval_ema_G)
+                if not math.isnan(ema_G_FID):
+                    save_as_best = (ema_G_FID < best_FID)
+                else:
+                    save_as_best = (ema_G_IS > best_IS)
+                if save_as_best:
+                    best_IS = ema_G_IS
+                    best_FID = best_FID if math.isnan(ema_G_FID) else ema_G_FID
                 ckpt = {
                     'net_G': net_G.state_dict(),
                     'net_D': net_D.state_dict(),
@@ -288,26 +305,11 @@ def train():
                     'ema_G': ema_G.state_dict(),
                     'step': step,
                     'fixed_z': fixed_z,
-                    'fixed_y': fixed_y,
+                    'best_IS': best_IS,
+                    'best_FID': best_FID,
                 }
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
-                if FLAGS.parallel:
-                    eval_net_G = torch.nn.DataParallel(net_G)
-                    eval_ema_G = torch.nn.DataParallel(ema_G)
-                else:
-                    eval_net_G = net_G
-                    eval_ema_G = ema_G
-                (net_G_IS, net_G_IS_std), net_G_FID = evaluate(eval_net_G)
-                (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(eval_ema_G)
-                (net_G_IS, net_G_IS_std), net_G_FID = evaluate(net_G)
-                (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(ema_G)
-                if not math.isnan(best_FID) and not math.isnan(ema_G_FID):
-                    save_as_best = (ema_G_FID < best_FID)
-                else:
-                    save_as_best = (ema_G_IS > best_IS)
                 if save_as_best:
-                    best_IS = ema_G_IS
-                    best_FID = ema_G_FID
                     torch.save(
                         ckpt, os.path.join(FLAGS.logdir, 'best_model.pt'))
                 pbar.write(

@@ -174,6 +174,8 @@ class ResGenerator32(nn.Module):
         self.initialize()
 
     def initialize(self):
+        init.kaiming_normal_(self.linear.weight)
+        init.zeros_(self.linear.bias)
         for m in self.output.modules():
             if isinstance(m, nn.Conv2d):
                 init.kaiming_normal_(m.weight)
@@ -204,6 +206,8 @@ class ResGenerator48(nn.Module):
         self.initialize()
 
     def initialize(self):
+        init.kaiming_normal_(self.linear.weight)
+        init.zeros_(self.linear.bias)
         for m in self.output.modules():
             if isinstance(m, nn.Conv2d):
                 init.kaiming_normal_(m.weight)
@@ -237,6 +241,8 @@ class ResGenerator128(nn.Module):
         self.initialize()
 
     def initialize(self):
+        init.kaiming_normal_(self.linear.weight)
+        init.zeros_(self.linear.bias)
         for m in self.output.modules():
             if isinstance(m, nn.Conv2d):
                 init.kaiming_normal_(m.weight)
