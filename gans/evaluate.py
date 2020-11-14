@@ -12,12 +12,13 @@ if __name__ == "__main__":
     parser.add_argument('--dir', type=str, required=True)
     parser.add_argument('--fid_cache', type=str, required=True)
     parser.add_argument('--eval_use_torch', action='store_true', default=False)
+    parser.add_argument('--num_images', type=int, default=None)
     args = parser.parse_args()
 
     files = (
         list(glob.glob(os.path.join(args.dir, '*.png'))) +
         list(glob.glob(os.path.join(args.dir, '*.jpg')))
-    )
+    )[:args.num_images]
 
     def image_loader(files):
         for file_path in files:

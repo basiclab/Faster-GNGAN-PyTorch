@@ -1,5 +1,6 @@
 import os
 import json
+import math
 
 import torch
 import torch.optim as optim
@@ -85,8 +86,10 @@ device = torch.device('cuda:0')
 
 def generate():
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
-    net_G.load_state_dict(
-        torch.load(os.path.join(FLAGS.logdir, 'model.pt'))['net_G'])
+    if os.path.isfile(os.path.join(FLAGS.logdir, 'best_model.pt')):
+        ckpt = torch.load(os.path.join(FLAGS.logdir, 'best_model.pt'))
+    else:
+        ckpt = torch.load(os.path.join(FLAGS.logdir, 'model.pt'))
 
     net_G.eval()
     images = generate_images(
@@ -170,6 +173,7 @@ def train():
         sched_D.load_state_dict(ckpt['sched_D'])
         fixed_z = ckpt['fixed_z']
         start = ckpt['step'] + 1
+        best_IS, best_FID = ckpt['best_ID'], ckpt['best_FID']
         writer = SummaryWriter(FLAGS.logdir)
         del ckpt
     else:
@@ -190,6 +194,7 @@ def train():
         writer.add_image('real_sample', grid)
         writer.flush()
         start = 1
+        best_IS, best_FID = 0, 999
 
     looper = infiniteloop(dataloader)
     with trange(start, FLAGS.total_steps + 1, dynamic_ncols=True,
@@ -268,6 +273,16 @@ def train():
 
             # evaluate IS, FID and save model
             if step == 1 or step % FLAGS.eval_step == 0:
+                (IS, IS_std), FID = evaluate(net_G)
+                if not math.isnan(FID):
+                    save_as_best = (FID < best_FID)
+                elif not math.isnan(IS):
+                    save_as_best = (IS > best_IS)
+                else:
+                    save_as_best = False
+                if save_as_best:
+                    best_IS = best_IS if math.isnan(IS) else IS
+                    best_FID = best_FID if math.isnan(FID) else FID
                 ckpt = {
                     'net_G': net_G.state_dict(),
                     'net_D': net_D.state_dict(),
@@ -277,9 +292,13 @@ def train():
                     'sched_D': sched_D.state_dict(),
                     'step': step,
                     'fixed_z': fixed_z,
+                    'best_IS': best_IS,
+                    'best_FID': best_FID,
                 }
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
-                (IS, IS_std), FID = evaluate(net_G)
+                if save_as_best:
+                    torch.save(
+                        ckpt, os.path.join(FLAGS.logdir, 'best_model.pt'))
                 pbar.write(
                     "%6d/%6d "
                     "IS:%6.3f(%.3f), FID:%7.3f" % (
