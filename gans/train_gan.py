@@ -91,6 +91,8 @@ def generate():
     else:
         ckpt = torch.load(os.path.join(FLAGS.logdir, 'model.pt'))
 
+    net_G.load_state_dict(ckpt['net_G'])
+
     net_G.eval()
     images = generate_images(
         net_G=net_G,
