@@ -85,8 +85,12 @@ device = torch.device('cuda:0')
 def generate():
     net_G = net_G_models[FLAGS.arch](FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim)
     net_G = net_G.to(device)
-    net_G.load_state_dict(
-        torch.load(os.path.join(FLAGS.logdir, 'model.pt'))['ema_G'])
+    if os.path.isfile(os.path.join(FLAGS.logdir, 'best_model.pt')):
+        ckpt = torch.load(os.path.join(FLAGS.logdir, 'best_model.pt'))
+    else:
+        ckpt = torch.load(os.path.join(FLAGS.logdir, 'model.pt'))
+
+    net_G.load_state_dict(ckpt['ema_G'])
 
     net_G.eval()
     images = images_generator(
@@ -161,7 +165,10 @@ def train():
         fixed_z = ckpt['fixed_z']
         fixed_y = ckpt['fixed_y']
         start = ckpt['step'] + 1
-        best_IS, best_FID = ckpt['best_ID'], ckpt['best_FID']
+        if 'best_ID' in ckpt and 'best_FID' in ckpt:
+            best_IS, best_FID = ckpt['best_ID'], ckpt['best_FID']
+        else:
+            best_IS, best_FID = 0, 999
         writer = SummaryWriter(FLAGS.logdir)
         writer_ema = SummaryWriter(FLAGS.logdir + "_ema")
         del ckpt
@@ -290,11 +297,13 @@ def train():
                 (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(eval_ema_G)
                 if not math.isnan(ema_G_FID):
                     save_as_best = (ema_G_FID < best_FID)
-                else:
+                elif not math.isnan(ema_G_IS):
                     save_as_best = (ema_G_IS > best_IS)
+                else:
+                    save_as_best = False
                 if save_as_best:
-                    best_IS = ema_G_IS
                     best_FID = best_FID if math.isnan(ema_G_FID) else ema_G_FID
+                    best_IS = best_IS if math.isnan(ema_G_IS) else ema_G_IS
                 ckpt = {
                     'net_G': net_G.state_dict(),
                     'net_D': net_D.state_dict(),
@@ -305,6 +314,7 @@ def train():
                     'ema_G': ema_G.state_dict(),
                     'step': step,
                     'fixed_z': fixed_z,
+                    'fixed_y': fixed_y,
                     'best_IS': best_IS,
                     'best_FID': best_FID,
                 }

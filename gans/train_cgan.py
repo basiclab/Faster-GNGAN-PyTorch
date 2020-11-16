@@ -1,5 +1,6 @@
 import os
 import json
+import math
 
 import torch
 import torch.optim as optim
@@ -82,8 +83,12 @@ device = torch.device('cuda:0')
 def generate():
     net_G = net_G_models[FLAGS.arch](FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim)
     net_G = net_G.to(device)
-    net_G.load_state_dict(
-        torch.load(os.path.join(FLAGS.logdir, 'model.pt'))['ema_G'])
+    if os.path.isfile(os.path.join(FLAGS.logdir, 'best_model.pt')):
+        ckpt = torch.load(os.path.join(FLAGS.logdir, 'best_model.pt'))
+    else:
+        ckpt = torch.load(os.path.join(FLAGS.logdir, 'model.pt'))
+
+    net_G.load_state_dict(ckpt['ema_G'])
 
     images = generate_images(
         net_G=net_G,
@@ -173,6 +178,10 @@ def train():
         fixed_z = ckpt['fixed_z']
         fixed_y = ckpt['fixed_y']
         start = ckpt['step'] + 1
+        if 'best_ID' in ckpt and 'best_FID' in ckpt:
+            best_IS, best_FID = ckpt['best_ID'], ckpt['best_FID']
+        else:
+            best_IS, best_FID = 0, 999
         writer = SummaryWriter(FLAGS.logdir)
         writer_ema = SummaryWriter(FLAGS.logdir + "_ema")
         del ckpt
@@ -202,6 +211,7 @@ def train():
         writer.add_image('real_sample', grid)
         writer.flush()
         start = 1
+        best_IS, best_FID = 0, 999
 
     looper = infiniteloop(dataloader)
     with trange(start, FLAGS.total_steps + 1, dynamic_ncols=True,
@@ -288,6 +298,23 @@ def train():
                     FLAGS.logdir, 'sample', '%d.png' % step))
 
             if step == 1 or step % FLAGS.eval_step == 0:
+                if FLAGS.parallel:
+                    eval_net_G = torch.nn.DataParallel(net_G)
+                    eval_ema_G = torch.nn.DataParallel(ema_G)
+                else:
+                    eval_net_G = net_G
+                    eval_ema_G = ema_G
+                (net_G_IS, net_G_IS_std), net_G_FID = evaluate(eval_net_G)
+                (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(eval_ema_G)
+                if not math.isnan(ema_G_FID):
+                    save_as_best = (ema_G_FID < best_FID)
+                elif not math.isnan(ema_G_IS):
+                    save_as_best = (ema_G_IS > best_IS)
+                else:
+                    save_as_best = False
+                if save_as_best:
+                    best_FID = best_FID if math.isnan(ema_G_FID) else ema_G_FID
+                    best_IS = best_IS if math.isnan(ema_G_IS) else ema_G_IS
                 ckpt = {
                     'net_G': net_G.state_dict(),
                     'net_D': net_D.state_dict(),
@@ -299,10 +326,13 @@ def train():
                     'step': step,
                     'fixed_z': fixed_z,
                     'fixed_y': fixed_y,
+                    'best_IS': best_IS,
+                    'best_FID': best_FID,
                 }
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
-                (net_G_IS, net_G_IS_std), net_G_FID = evaluate(net_G)
-                (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(ema_G)
+                if save_as_best:
+                    torch.save(
+                        ckpt, os.path.join(FLAGS.logdir, 'best_model.pt'))
                 pbar.write(
                     "%6d/%6d "
                     "IS:%6.3f(%.3f), FID:%7.3f, "
