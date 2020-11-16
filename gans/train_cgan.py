@@ -298,14 +298,8 @@ def train():
                     FLAGS.logdir, 'sample', '%d.png' % step))
 
             if step == 1 or step % FLAGS.eval_step == 0:
-                if FLAGS.parallel:
-                    eval_net_G = torch.nn.DataParallel(net_G)
-                    eval_ema_G = torch.nn.DataParallel(ema_G)
-                else:
-                    eval_net_G = net_G
-                    eval_ema_G = ema_G
-                (net_G_IS, net_G_IS_std), net_G_FID = evaluate(eval_net_G)
-                (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(eval_ema_G)
+                (net_G_IS, net_G_IS_std), net_G_FID = evaluate(net_G)
+                (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(ema_G)
                 if not math.isnan(ema_G_FID):
                     save_as_best = (ema_G_FID < best_FID)
                 elif not math.isnan(ema_G_IS):
