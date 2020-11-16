@@ -111,7 +111,7 @@ def evaluate(net_G):
     return (IS, IS_std), FID
 
 
-def consistency_loss(net_D, real, pred_real):
+def consistency_loss(net_D, x_real, y_real, pred_real):
     consistency_transforms = transforms.Compose([
         transforms.Lambda(lambda x: (x + 1) / 2),
         transforms.ToPILImage(mode='RGB'),
@@ -121,11 +121,11 @@ def consistency_loss(net_D, real, pred_real):
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ])
 
-    aug_real = real.detach().clone().cpu()
+    aug_real = x_real.detach().clone().cpu()
     for idx, img in enumerate(aug_real):
         aug_real[idx] = consistency_transforms(img)
     aug_real = aug_real.to(device)
-    loss = ((net_D(aug_real) - pred_real) ** 2).mean()
+    loss = ((net_D(aug_real, y=y_real) - pred_real) ** 2).mean()
     return loss
 
 
@@ -225,7 +225,8 @@ def train():
                 pred_real, pred_fake = net_GD(z, y, x_real, y_real)
                 loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
                 if FLAGS.cr > 0:
-                    loss_cr = consistency_loss(net_D, real, pred_real)
+                    loss_cr = consistency_loss(
+                        net_D, x_real, y_real, pred_real)
                 else:
                     loss_cr = torch.tensor(0.)
                 loss_all = loss + FLAGS.cr * loss_cr
