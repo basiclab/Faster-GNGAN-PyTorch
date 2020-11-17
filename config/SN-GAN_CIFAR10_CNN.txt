@@ -8,11 +8,11 @@
 --fid_cache=./stats/cifar10_test.npz
 --logdir=./logs/SN-GAN_CIFAR10_CNN_0
 --loss=hinge
---lr_decay_start=200000
+--lr_decay_start=100000
 --n_dis=1
 --num_images=50000
 --sample_size=64
 --sample_step=500
 --seed=0
---total_steps=200000
+--total_steps=100000
 --z_dim=128

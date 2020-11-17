@@ -1,4 +1,4 @@
---D_lr=0.0002
+--D_lr=0.0004
 --G_lr=0.0002
 --arch=gn-res32
 --batch_size=64

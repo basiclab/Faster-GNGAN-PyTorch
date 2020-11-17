@@ -8,11 +8,11 @@
 --fid_cache=./stats/stl10_unlabeled48.npz
 --logdir=./logs/SN-GAN-CR_STL10_CNN_0
 --loss=hinge
---lr_decay_start=0
+--lr_decay_start=100000
 --n_dis=1
 --num_images=50000
 --sample_size=64
 --sample_step=500
 --seed=0
---total_steps=200000
+--total_steps=100000
 --z_dim=128
