@@ -18,13 +18,23 @@ stats
 *.png
 _cache_*
 
+# readme figure
+!figures/cifar10_res_cr.png
+!figures/cifar10_biggan_10x10.png
+!figures/celebhq128_3x3.png
+!figures/lsun_church128_3x3.png
+
 # pdf
 *.pdf
 
 # model
 *.pt
 
-# test scripts
+# temporary scripts
 *.py
 *.sh
 !*/**/*.py
+
+!eval_*.sh
+!sample_grid.py
+!sample_grid_with_select.py

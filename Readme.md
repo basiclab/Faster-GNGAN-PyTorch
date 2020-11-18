@@ -1,101 +1,93 @@
-# Collections of GANs
+# Gradient Normalization for Generative Adversarial Networks
 
-Pytorch implementation of unsupervised GANs.
-
-For more defails about calculating Inception Score and FID Score using pytorch can be found in [Pytorch-Unified-Inception-FID-Score](https://github.com/w86763777/Pytorch-Unified-Inception-FID-Score) 
-
-## Models
-- [x] DCGAN
-- [x] WGAN
-- [x] WGAN-GP
-- [x] SN-GAN 
+The author's official implementation of GN-GAN.
 
 ## Requirements
-- python 3.6
+- Python 3.6
 - Install python packages
     ```bash
     pip install -U pip setuptools
     pip install -r requirements.txt
     ```
 
-## Results
+## Datasets
+- CIFAR-10
 
-|Model          |Dataset|Inception Score|FID Score|
-|---------------|-------|---------------|---------|
-|DCGAN          |CIFAR10|6.524(0.057)   |37.35    |
-|WGAN(CNN)      |CIFAR10|6.605(0.071)   |30.73    |
-|WGAN-GP(CNN)   |CIFAR10|7.415(0.065)   |21.89    |
-|WGAN-GP(ResNet)|CIFAR10|7.829(0.076)   |15.57    |
-|SNGAN(CNN)     |CIFAR10|7.521(0.111)   |20.41    |
-|SNGAN(ResNet)  |CIFAR10|8.214(0.094)   |14.41    |
+    We use Pytorch build-in CIFAR-10.
 
-## Examples
-- DCGAN
+- STL-10
 
-    ![image](https://drive.google.com/uc?export=view&id=14vz9JTxi4A8p5x2kiS7STnAMMGJb8_U0) ![image](./images/dcgan_cifar10.png)
+    We use Pytorch build-in STL-10.
 
-- WGAN(CNN)
+- CelebA-HQ 128x128
 
-    ![image](https://drive.google.com/uc?export=view&id=12Y5E-Vf-U-fzPLO_bmhhLNK1-q0Lo_OS) ![image](./images/wgan_cifar10_cnn.png)
-
-- WGAN-GP(CNN)
-
-    ![image](https://drive.google.com/uc?export=view&id=1i7B2i_nDZrTyvhOefmEHRs_mGXU7mv4Q) ![image](./images/wgangp_cifar10_cnn.png)
-
-- WGAN-GP(ResNet)
-
-    ![image](https://drive.google.com/uc?export=view&id=1WbMPMUwd2ltDkqowBMcIwUWP7dF87LH0) ![image](./images/wgangp_cifar10_res.png)
-
-- SNGAN(CNN)
-
-    ![image](https://drive.google.com/uc?export=view&id=1tQyWeyjNNOlWWBPo2XwhwZQ9t1q5a1v5) ![image](./images/sngan_cifar10_cnn.png)
-
-- SNGAN(ResNet)
-
-    ![image](https://drive.google.com/uc?export=view&id=1CN6vgPqodAQBtp9OElPvCaNakomKKP4E) ![image](./images/sngan_cifar10_res.png)
-
-## Reproduce
-Download [cifar10_stats.npz](https://drive.google.com/file/d/1vCMd9Q7f6oaVnmaggalGV-LbKk2eXNTQ/view?usp=sharing) for calculating FID score
-and put it to `./stats/cifar10_stats.npz` which is the default path
-
-### Training
-- DCGAN
-	```
-    python gans/dcgan.py --flagfile ./config/DCGAN_CIFAR10.txt
+    Please manually split dataset into 27k for training and 3k for testing. The
+    Folder structure is as follows:
     ```
-- WGAN(CNN)
-	```
-    python gans/wgan.py --flagfile ./config/WGAN_CIFAR10_CNN.txt
-    ```
-- WGAN-GP(CNN)
-	```
-    python gans/wgangp.py --flagfile ./config/WGANGP_CIFAR10_CNN.txt
-    ```
-- WGAN-GP(ResNet)
-	```
-    python gans/wgangp.py --flagfile ./config/WGANGP_CIFAR10_RES.txt
-    ```
-- SNGAN(CNN)
-	```
-    python gans/sngan.py --flagfile ./config/SNGAN_CIFAR10_CNN.txt
-    ```
-- SNGAN(ResNet)
-	```
-    python gans/sngan.py --flagfile ./config/SNGAN_CIFAR10_RES.txt
+    data/celebhq
+    ├── train128
+    │   └── dummy
+    │       ├── 00001.jpg
+    │       ├── ...
+    └── val128
+        └── dummy
+            ├── 27001.jpg
+            ├── ...
     ```
 
-### Generate GIF
-```bash
-python tools/sample2gif.py --logdir path/to/logdir
-```
-e.g.
-```bash
-python tools/sample2gif.py --logdir ./logs/DCGAN_CIFAR10
-```
-output GIF is `./logs/DCGAN_CIFAR10/progress.gif`
+- [LSUN Church Outdoor](https://www.yf.io/p/lsun) 128x128
 
-## Notes
-Due to nondetermnistic operations such as `atomicAdd`, the
-[reproducibility](https://pytorch.org/docs/stable/notes/randomness.html) is
-not guaranteed on all devices in this repository even I set random seed for all the used packages. All the experimental results were produced on single NVIDIA-2080Ti, if any body want to reproduce results, you should prepare
-same GPU for exactly same outputs.
+    Please manually split dataset into 27k for training and 3k for testing. The
+    Folder structure is as follows:
+    ```
+    data/lsun/
+    ├── church_outdoor_train_lmdb
+    │   ├── data.mdb
+    │   └── lock.mdb
+    └── church_outdoor_val_lmdb
+        ├── data.mdb
+        └── lock.mdb
+    ```
+
+## How to Run
+- There are 3 training scripts in `gans`, i.e., `train_gan.py`, `train_cgan.py` and `train_gan128.py`. Following is the Table of compatible configuration.
+
+    |script         |configurations|
+    |---------------|--------------|
+    |train_gan.py   |`GN-GAN_CIFAR10_CNN.txt`,<br>`GN-GAN_CIFAR10_RES.txt`,<br>`GN-GAN_STL10_CNN.txt`,<br>`GN-GAN_STL10_RES.txt`,<br>`GN-GAN-CR_CIFAR10_CNN.txt`,<br>`GN-GAN-CR_CIFAR10_RES.txt`,<br>`GN-GAN-CR_STL10_CNN.txt`,<br>`GN-GAN-CR_STL10_RES.txt`|
+    |train_cgan.py  |`GN-cGAN_CIFAR10_BIGGAN.txt`|
+    |train_gan128.py|`GN-GAN_CELEBHQ128_RES.txt`,<br>`GN-GAN_CHURCH128_RES.txt`|
+
+- Run the script with the compatible configuration, i.e.,
+    ```
+    python gans/train_gan.py \
+        --flagfile ./config/GN-GAN-CR_CIFAR10_RES.txt \
+        --logdir ./logs/GN-GAN-CR_CIFAR10_RES
+    ```
+
+- Generate images from pretrained model.
+
+    For example,
+    ```
+    python gans/train_gan.py \
+        --flagfile ./logs/GN-GAN-CR_CIFAR10_RES/flagfile.txt \
+        --generate \
+        --num_images 50000
+    ```
+
+    The generated samples are saved into `./logs/GN-GAN-CR_CIFAR10_RES/generate`
+
+
+## Samples
+- GN-GAN-CR_CIFAR10_RES.txt
+
+    ![](./figures/cifar10_res_cr.png)
+- GN-cGAN_CIFAR10_BIGGAN.txt
+
+    ![](./figures/cifar10_biggan_10x10.png)
+- GN-GAN_CHURCH128_RES.txt
+
+    ![](./figures/lsun_church128_3x3.png)
+- GN-GAN_CELEBHQ128_RES.txt
+
+    ![](./figures/celebhq128_3x3.png)
