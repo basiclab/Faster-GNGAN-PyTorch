@@ -15,7 +15,8 @@ from common.losses import HingeLoss
 from common.datasets import get_dataset
 from common.score.score import get_inception_and_fid_score
 from common.utils import (
-    ema, generate_images, save_images, module_no_grad, infiniteloop, set_seed)
+    ema, generate_images, save_images, module_no_grad, infiniteloop, set_seed,
+    record_weight_norm)
 
 
 net_G_models = {
@@ -61,6 +62,8 @@ flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.999], "for Adam")
 flags.DEFINE_integer('n_dis', 4, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
+flags.DEFINE_float('boundary', 1., "boundary value of hinge loss")
+flags.DEFINE_float('scale', 1., "boundary value of hinge loss")
 flags.DEFINE_float('cr', 0, "weight for consistency regularization")
 flags.DEFINE_integer('seed', 0, "random seed")
 # ema
@@ -154,7 +157,7 @@ def train():
     ema(net_G, ema_G, decay=0)
 
     # loss
-    loss_fn = HingeLoss()
+    loss_fn = HingeLoss(FLAGS.boundary, FLAGS.scale)
 
     # optimizer
     optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
@@ -298,6 +301,7 @@ def train():
                     FLAGS.logdir, 'sample', '%d.png' % step))
 
             if step == 1 or step % FLAGS.eval_step == 0:
+                record_weight_norm(net_G, net_D, writer, step)
                 (net_G_IS, net_G_IS_std), net_G_FID = evaluate(net_G)
                 (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(ema_G)
                 if not math.isnan(ema_G_FID):
