@@ -35,7 +35,8 @@ net_GD_models = {
 datasets = [
     'imagenet128', 'imagenet128.hdf5',
     'celebhq128', 'celebhq128.hdf5',
-    'lsun_church_outdoor', 'lsun_church_outdoor.hdf5',]
+    'lsun_church_outdoor', 'lsun_church_outdoor.hdf5'
+]
 
 
 FLAGS = flags.FLAGS
@@ -55,6 +56,7 @@ flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
+flags.DEFINE_float('scale', 1., "boundary value of hinge loss")
 flags.DEFINE_bool('parallel', False, 'multi-gpu training')
 flags.DEFINE_integer('seed', 0, "random seed")
 # ema
@@ -126,7 +128,7 @@ def train():
     ema(net_G, ema_G, decay=0)
 
     # loss
-    loss_fn = HingeLoss()
+    loss_fn = HingeLoss(FLAGS.scale)
 
     # optimizer
     optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)

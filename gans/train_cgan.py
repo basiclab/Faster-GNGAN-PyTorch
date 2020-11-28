@@ -62,7 +62,6 @@ flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.999], "for Adam")
 flags.DEFINE_integer('n_dis', 4, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
-flags.DEFINE_float('boundary', 1., "boundary value of hinge loss")
 flags.DEFINE_float('scale', 1., "boundary value of hinge loss")
 flags.DEFINE_float('cr', 0, "weight for consistency regularization")
 flags.DEFINE_integer('seed', 0, "random seed")
@@ -157,7 +156,7 @@ def train():
     ema(net_G, ema_G, decay=0)
 
     # loss
-    loss_fn = HingeLoss(FLAGS.boundary, FLAGS.scale)
+    loss_fn = HingeLoss(FLAGS.scale)
 
     # optimizer
     optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)

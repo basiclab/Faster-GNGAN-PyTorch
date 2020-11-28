@@ -64,6 +64,7 @@ flags.DEFINE_float('D_lr', 4e-4, "Discriminator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
+flags.DEFINE_float('scale', 1., "boundary value of hinge loss")
 flags.DEFINE_float('cr', 0, "weight for consistency regularization")
 flags.DEFINE_integer('seed', 0, "random seed")
 # logging
@@ -149,7 +150,7 @@ def train():
         net_D = gn_gan.GradNorm(net_D)
 
     # loss
-    loss_fn = loss_fns[FLAGS.loss]()
+    loss_fn = loss_fns[FLAGS.loss](FLAGS.scale)
 
     # optimizer
     optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
