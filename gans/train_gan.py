@@ -172,7 +172,7 @@ def train():
         sched_D.load_state_dict(ckpt['sched_D'])
         fixed_z = ckpt['fixed_z']
         start = ckpt['step'] + 1
-        best_IS, best_FID = ckpt['best_ID'], ckpt['best_FID']
+        best_IS, best_FID = ckpt['best_IS'], ckpt['best_FID']
         writer = SummaryWriter(FLAGS.logdir)
         del ckpt
     else:
