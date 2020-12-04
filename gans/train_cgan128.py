@@ -114,7 +114,7 @@ def evaluate(net_G):
         batch_size=FLAGS.G_batch_size)
     (IS, IS_std), FID = get_inception_and_fid_score(
         images, FLAGS.fid_cache, num_images=FLAGS.num_images,
-        use_torch=FLAGS.eval_use_torch, verbose=True)
+        use_torch=FLAGS.eval_use_torch, parallel=FLAGS.parallel, verbose=True)
     del images
     net_G.train()
     return (IS, IS_std), FID
@@ -135,6 +135,9 @@ def train():
     if FLAGS.arch.startswith('gn'):
         net_D = gn_gan.GradNorm(net_D)
     net_GD = net_GD_models[FLAGS.arch](net_G, net_D)
+
+    if FLAGS.parallel:
+        net_GD = torch.nn.DataParallel(net_GD)
 
     # ema
     ema(net_G, ema_G, decay=0)
@@ -166,8 +169,8 @@ def train():
         fixed_z = ckpt['fixed_z']
         fixed_y = ckpt['fixed_y']
         start = ckpt['step'] + 1
-        if 'best_ID' in ckpt and 'best_FID' in ckpt:
-            best_IS, best_FID = ckpt['best_ID'], ckpt['best_FID']
+        if 'best_IS' in ckpt and 'best_FID' in ckpt:
+            best_IS, best_FID = ckpt['best_IS'], ckpt['best_FID']
         else:
             best_IS, best_FID = 0, 999
         writer = SummaryWriter(FLAGS.logdir)

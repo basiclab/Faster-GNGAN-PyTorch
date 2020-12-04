@@ -180,8 +180,8 @@ def train():
         fixed_z = ckpt['fixed_z']
         fixed_y = ckpt['fixed_y']
         start = ckpt['step'] + 1
-        if 'best_ID' in ckpt and 'best_FID' in ckpt:
-            best_IS, best_FID = ckpt['best_ID'], ckpt['best_FID']
+        if 'best_IS' in ckpt and 'best_FID' in ckpt:
+            best_IS, best_FID = ckpt['best_IS'], ckpt['best_FID']
         else:
             best_IS, best_FID = 0, 999
         writer = SummaryWriter(FLAGS.logdir)

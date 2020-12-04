@@ -151,7 +151,7 @@ def train():
         ema_G.load_state_dict(ckpt['ema_G'])
         fixed_z = ckpt['fixed_z']
         start = ckpt['step'] + 1
-        best_IS, best_FID = ckpt['best_ID'], ckpt['best_FID']
+        best_IS, best_FID = ckpt['best_IS'], ckpt['best_FID']
         writer = SummaryWriter(FLAGS.logdir)
         writer_ema = SummaryWriter(FLAGS.logdir + "_ema")
         del ckpt
@@ -274,11 +274,13 @@ def train():
                 (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(eval_ema_G)
                 if not math.isnan(ema_G_FID):
                     save_as_best = (ema_G_FID < best_FID)
-                else:
+                elif not math.isnan(ema_G_IS):
                     save_as_best = (ema_G_IS > best_IS)
+                else:
+                    save_as_best = False
                 if save_as_best:
-                    best_IS = ema_G_IS
                     best_FID = best_FID if math.isnan(ema_G_FID) else ema_G_FID
+                    best_IS = best_IS if math.isnan(ema_G_IS) else ema_G_IS
                 ckpt = {
                     'net_G': net_G.state_dict(),
                     'net_D': net_D.state_dict(),
