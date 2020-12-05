@@ -79,16 +79,16 @@ class GenBlock(nn.Module):
         self.residual1 = nn.Sequential(
             nn.ReLU(inplace=True),
             nn.Upsample(scale_factor=2),
-            nn.Conv2d(in_channels, out_channels, 3, stride=1, padding=1))
+            sn(nn.Conv2d(in_channels, out_channels, 3, stride=1, padding=1)))
         self.bn2 = ConditionalBatchNorm2d(out_channels, cbn_in_dim, cbn_linear)
         self.residual2 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1))
+            sn(nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1)))
 
         # shortcut
         self.shortcut = nn.Sequential(
             nn.Upsample(scale_factor=2),
-            nn.Conv2d(in_channels, out_channels, 1, stride=1, padding=0))
+            sn(nn.Conv2d(in_channels, out_channels, 1, stride=1, padding=0)))
 
     def forward(self, x, y):
         h = self.residual1(self.bn1(x, y))
@@ -279,8 +279,6 @@ class GenDis(nn.Module):
             return net_D_real, net_D_fake
         else:
             x_fake = self.net_G(z, y_fake)
-            for p in self.net_D.parameters():
-                assert(p.requires_grad is False)
             net_D_fake = self.net_D(x_fake, y=y_fake)
             return net_D_fake
 

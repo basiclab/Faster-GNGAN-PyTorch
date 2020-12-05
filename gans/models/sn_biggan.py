@@ -75,16 +75,16 @@ class GenBlock(nn.Module):
         self.residual1 = nn.Sequential(
             nn.ReLU(inplace=True),
             nn.Upsample(scale_factor=2),
-            nn.Conv2d(in_channels, out_channels, 3, stride=1, padding=1))
+            sn(nn.Conv2d(in_channels, out_channels, 3, stride=1, padding=1)))
         self.bn2 = ConditionalBatchNorm2d(out_channels, cbn_in_dim, cbn_linear)
         self.residual2 = nn.Sequential(
             nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1))
+            sn(nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1)))
 
         # shortcut
         self.shortcut = nn.Sequential(
             nn.Upsample(scale_factor=2),
-            nn.Conv2d(in_channels, out_channels, 1, stride=1, padding=0))
+            sn(nn.Conv2d(in_channels, out_channels, 1, stride=1, padding=0)))
 
     def forward(self, x, y):
         h = self.residual1(self.bn1(x, y))
