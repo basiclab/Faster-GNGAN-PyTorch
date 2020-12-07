@@ -1,6 +1,8 @@
+--D_accumulation=1
 --D_batch_size=50
---G_batch_size=50
 --D_lr=0.0002
+--G_accumulation=1
+--G_batch_size=50
 --G_lr=0.0001
 --arch=gn-biggan32
 --betas=0.0
@@ -10,6 +12,7 @@
 --dataset=cifar10
 --ema_decay=0.9999
 --ema_start=1000
+--eps=1e-8
 --eval_step=5000
 --eval_use_torch
 --fid_cache=./stats/cifar10_test.npz
