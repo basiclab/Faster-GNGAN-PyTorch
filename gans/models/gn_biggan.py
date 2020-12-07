@@ -5,7 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-sn = partial(torch.nn.utils.spectral_norm, eps=1e-6)
+# sn = partial(torch.nn.utils.spectral_norm, eps=1e-6)
+sn = lambda x: x
 
 
 class Attention(nn.Module):
@@ -267,10 +268,9 @@ class GenDis(nn.Module):
         self.net_G = net_G
         self.net_D = net_D
 
-    def forward(self, z, y_fake, x_real=None, y_real=None, **kwargs):
+    def forward(self, z, y_fake, x_real=None, y_real=None):
         if x_real is not None and y_real is not None:
-            with torch.no_grad():
-                x_fake = self.net_G(z, y_fake).detach()
+            x_fake = self.net_G(z, y_fake).detach()
             x = torch.cat([x_real, x_fake], dim=0)
             y = torch.cat([y_real, y_fake], dim=0)
             pred = self.net_D(x, y=y)
@@ -295,14 +295,3 @@ def res128_weights_init(m):
     for module in m.modules():
         if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
             torch.nn.init.orthogonal_(module.weight)
-
-
-generators = {
-    'res32': Generator32,
-    'res128': Generator128,
-}
-
-discriminators = {
-    'res32': Discriminator32,
-    'res128': Discriminator128,
-}

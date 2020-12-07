@@ -180,10 +180,7 @@ def train():
         fixed_z = ckpt['fixed_z']
         fixed_y = ckpt['fixed_y']
         start = ckpt['step'] + 1
-        if 'best_IS' in ckpt and 'best_FID' in ckpt:
-            best_IS, best_FID = ckpt['best_IS'], ckpt['best_FID']
-        else:
-            best_IS, best_FID = 0, 999
+        best_IS, best_FID = ckpt['best_IS'], ckpt['best_FID']
         writer = SummaryWriter(FLAGS.logdir)
         writer_ema = SummaryWriter(FLAGS.logdir + "_ema")
         del ckpt
@@ -201,7 +198,6 @@ def train():
             f.write(FLAGS.flags_into_string())
         writer.add_text(
             "flagfile", FLAGS.flags_into_string().replace('\n', '  \n'))
-
         # sample real data
         real = []
         for x, _ in dataloader:
@@ -212,6 +208,7 @@ def train():
         grid = (make_grid(real) + 1) / 2
         writer.add_image('real_sample', grid)
         writer.flush()
+        # initialize
         start = 1
         best_IS, best_FID = 0, 999
 

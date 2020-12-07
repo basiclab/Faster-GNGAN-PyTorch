@@ -94,6 +94,11 @@ def module_no_grad(m: torch.nn.Module):
         param.requires_grad_(requires_grad_dict[name])
 
 
+def set_grad(m: torch.nn.Module, requires_grad: bool):
+    for name, param in m.named_parameters():
+        param.requires_grad_(requires_grad)
+
+
 def record_weight_norm(net_G, net_D, writer, step: int):
     for name, p in net_G.named_parameters():
         weight_norm = torch.sqrt((p * p).sum())
