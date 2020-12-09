@@ -5,8 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-# sn = partial(torch.nn.utils.spectral_norm, eps=1e-6)
-sn = lambda x: x
+sn = partial(torch.nn.utils.spectral_norm, eps=1e-6)
+# sn = lambda x: x
 
 
 class Attention(nn.Module):
