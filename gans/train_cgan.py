@@ -15,28 +15,21 @@ from common.losses import HingeLoss
 from common.datasets import get_dataset
 from common.score.score import get_inception_and_fid_score
 from common.utils import (
-    ema, generate_images, save_images, module_no_grad, infiniteloop, set_seed,
-    record_weight_norm)
+    ema, generate_images, save_images, set_grad, infiniteloop, set_seed)
 
 
 net_G_models = {
-    'gn-res32': gn_cgan.ResGenerator32,
     'gn-biggan32': gn_biggan.Generator32,
-    'sn-res32': sn_cgan.ResGenerator32,
     'sn-biggan32': sn_biggan.Generator32,
 }
 
 net_D_models = {
-    'gn-res32': gn_cgan.ResDiscriminator32,
     'gn-biggan32': gn_biggan.Discriminator32,
-    'sn-res32': sn_cgan.ResDiscriminator32,
     'sn-biggan32': sn_biggan.Discriminator32,
 }
 
 net_GD_models = {
-    'gn-res32': gn_cgan.GenDis,
     'gn-biggan32': gn_biggan.GenDis,
-    'sn-res32': sn_cgan.GenDis,
     'sn-biggan32': sn_biggan.GenDis,
 }
 
@@ -216,6 +209,14 @@ def train():
         start = 1
         best_IS, best_FID = 0, 999
 
+    D_size = 0
+    for param in net_D.parameters():
+        D_size += param.data.nelement()
+    G_size = 0
+    for param in net_G.parameters():
+        G_size += param.data.nelement()
+    print('D params: %d, G params: %d' % (D_size, G_size))
+
     looper = infiniteloop(dataloader)
     with trange(start, FLAGS.total_steps + 1, dynamic_ncols=True,
                 initial=start - 1, total=FLAGS.total_steps) as pbar:
@@ -228,6 +229,7 @@ def train():
             net_G.train()
 
             # Discriminator
+            set_grad(net_G, False)
             for _ in range(FLAGS.n_dis):
                 x_real, y_real = next(looper)
                 x_real, y_real = x_real.to(device), y_real.to(device)
@@ -252,6 +254,7 @@ def train():
                 loss_real_sum += loss_real.cpu().item()
                 loss_fake_sum += loss_fake.cpu().item()
                 loss_cr_sum += loss_cr.cpu().item()
+            set_grad(net_G, True)
 
             loss = loss_sum / FLAGS.n_dis
             loss_real = loss_real_sum / FLAGS.n_dis
@@ -268,15 +271,16 @@ def train():
                 loss_fake='%.3f' % loss_fake)
 
             # Generator
+            set_grad(net_D, False)
+            optim_G.zero_grad()
             z = torch.randn(
                 FLAGS.G_batch_size, FLAGS.z_dim, device=device)
             y = torch.randint(
                 FLAGS.n_classes, (FLAGS.G_batch_size,), device=device)
-            with module_no_grad(net_D):
-                loss = loss_fn(net_GD(z, y))
-            optim_G.zero_grad()
+            loss = loss_fn(net_GD(z, y))
             loss.backward()
             optim_G.step()
+            set_grad(net_D, True)
 
             # scheduler
             sched_G.step()
@@ -301,7 +305,6 @@ def train():
                     FLAGS.logdir, 'sample', '%d.png' % step))
 
             if step == 1 or step % FLAGS.eval_step == 0:
-                record_weight_norm(net_G, net_D, writer, step)
                 (net_G_IS, net_G_IS_std), net_G_FID = evaluate(net_G)
                 (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(ema_G)
                 if not math.isnan(ema_G_FID):

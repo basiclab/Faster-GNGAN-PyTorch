@@ -15,7 +15,7 @@ from common.losses import HingeLoss
 from common.datasets import get_dataset
 from common.score.score import get_inception_and_fid_score
 from common.utils import (
-    ema, images_generator, save_images, set_grad, infiniteloop, set_seed)
+    ema, generate_images, save_images, set_grad, infiniteloop, set_seed)
 
 
 net_G_models = {
@@ -95,28 +95,29 @@ def generate():
 
     net_G.load_state_dict(ckpt['ema_G'])
 
-    net_G.eval()
-    images = images_generator(
+    images = generate_images(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
         n_classes=FLAGS.n_classes,
         num_images=FLAGS.num_images,
-        batch_size=FLAGS.G_batch_size)
+        batch_size=FLAGS.G_batch_size,
+        verbose=True)
     save_images(
         images, os.path.join(FLAGS.logdir, 'generate'), verbose=True)
 
 
 def evaluate(net_G):
-    images = images_generator(
+    images = generate_images(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
         n_classes=FLAGS.n_classes,
         num_images=FLAGS.num_images,
-        batch_size=FLAGS.G_batch_size)
+        batch_size=FLAGS.G_batch_size,
+        verbose=True)
     (IS, IS_std), FID = get_inception_and_fid_score(
         images, FLAGS.fid_cache, num_images=FLAGS.num_images,
-        use_torch=FLAGS.eval_use_torch, parallel=FLAGS.parallel, verbose=True)
-    net_G.train()
+        use_torch=FLAGS.eval_use_torch, verbose=True)
+    del images
     return (IS, IS_std), FID
 
 
@@ -164,10 +165,8 @@ def train():
     loss_fn = HingeLoss(FLAGS.scale)
 
     # optimizer
-    optim_G = optim.Adam(
-        net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas, eps=FLAGS.eps)
-    optim_D = optim.Adam(
-        net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas, eps=FLAGS.eps)
+    optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
+    optim_D = optim.Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
 
     # scheduler
     def decay_rate(step):
@@ -317,14 +316,8 @@ def train():
                     FLAGS.logdir, 'sample', '%d.png' % step))
 
             if step == 1 or step % FLAGS.eval_step == 0:
-                if FLAGS.parallel:
-                    eval_net_G = torch.nn.DataParallel(net_G)
-                    eval_ema_G = torch.nn.DataParallel(ema_G)
-                else:
-                    eval_net_G = net_G
-                    eval_ema_G = ema_G
-                (net_G_IS, net_G_IS_std), net_G_FID = evaluate(eval_net_G)
-                (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(eval_ema_G)
+                (net_G_IS, net_G_IS_std), net_G_FID = evaluate(net_G)
+                (ema_G_IS, ema_G_IS_std), ema_G_FID = evaluate(ema_G)
                 if not math.isnan(ema_G_FID):
                     save_as_best = (ema_G_FID < best_FID)
                 elif not math.isnan(ema_G_IS):
