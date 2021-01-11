@@ -10,31 +10,37 @@ from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
-from models import sn_cgan, gn_cgan, gn_biggan, sn_biggan, gn_gan
+from models import gn_biggan, sn_biggan, gn_gan
 from common.losses import HingeLoss
 from common.datasets import get_dataset
 from common.score.score import get_inception_and_fid_score
 from common.utils import (
-    ema, generate_images, save_images, set_grad, infiniteloop, set_seed)
+    ema, generate_images, save_images, module_no_grad, infiniteloop, set_seed)
 
 
 net_G_models = {
     'gn-biggan32': gn_biggan.Generator32,
+    'gn-biggan128': gn_biggan.Generator128,
     'sn-biggan32': sn_biggan.Generator32,
+    'sn-biggan128': sn_biggan.Generator128,
 }
 
 net_D_models = {
     'gn-biggan32': gn_biggan.Discriminator32,
+    'gn-biggan128': gn_biggan.Discriminator128,
     'sn-biggan32': sn_biggan.Discriminator32,
+    'sn-biggan128': sn_biggan.Discriminator128,
 }
 
 net_GD_models = {
     'gn-biggan32': gn_biggan.GenDis,
+    'gn-biggan128': gn_biggan.GenDis,
     'sn-biggan32': sn_biggan.GenDis,
+    'sn-biggan128': sn_biggan.GenDis,
 }
 
 
-datasets = ['cifar10']
+datasets = ['cifar10', 'imagenet128', 'imagenet128.hdf5']
 
 
 FLAGS = flags.FLAGS
@@ -88,6 +94,8 @@ def generate():
         ckpt = torch.load(os.path.join(FLAGS.logdir, 'model.pt'))
 
     net_G.load_state_dict(ckpt['ema_G'])
+    if FLAGS.parallel:
+        net_G = torch.nn.DataParallel(net_G)
 
     images = generate_images(
         net_G=net_G,
@@ -101,6 +109,8 @@ def generate():
 
 
 def evaluate(net_G):
+    if FLAGS.parallel:
+        net_G = torch.nn.DataParallel(net_G)
     images = generate_images(
         net_G=net_G,
         z_dim=FLAGS.z_dim,
@@ -110,7 +120,7 @@ def evaluate(net_G):
         verbose=True)
     (IS, IS_std), FID = get_inception_and_fid_score(
         images, FLAGS.fid_cache, num_images=FLAGS.num_images,
-        use_torch=FLAGS.eval_use_torch, verbose=True)
+        use_torch=FLAGS.eval_use_torch, verbose=True, parallel=FLAGS.parallel)
     del images
     return (IS, IS_std), FID
 
@@ -148,6 +158,9 @@ def train():
     if FLAGS.arch.startswith('gn'):
         net_D = gn_gan.GradNorm(net_D)
     net_GD = net_GD_models[FLAGS.arch](net_G, net_D)
+
+    if FLAGS.parallel:
+        net_GD = torch.nn.DataParallel(net_GD)
 
     # ema
     ema(net_G, ema_G, decay=0)
@@ -229,37 +242,36 @@ def train():
             net_G.train()
 
             # Discriminator
-            set_grad(net_G, False)
-            for _ in range(FLAGS.n_dis):
-                x_real, y_real = next(looper)
-                x_real, y_real = x_real.to(device), y_real.to(device)
-                z = torch.randn(
-                    FLAGS.D_batch_size, FLAGS.z_dim, device=device)
-                y = torch.randint(
-                    FLAGS.n_classes, (FLAGS.D_batch_size,), device=device)
-                pred_real, pred_fake = net_GD(z, y, x_real, y_real)
-                loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
-                if FLAGS.cr > 0:
-                    loss_cr = consistency_loss(
-                        net_D, x_real, y_real, pred_real)
-                else:
-                    loss_cr = torch.tensor(0.)
-                loss_all = loss + FLAGS.cr * loss_cr
-
+            for n in range(FLAGS.n_dis):
                 optim_D.zero_grad()
-                loss_all.backward()
+                for _ in range(FLAGS.D_accumulation):
+                    x_real, y_real = next(looper)
+                    x_real, y_real = x_real.to(device), y_real.to(device)
+                    z = torch.randn(
+                        FLAGS.D_batch_size, FLAGS.z_dim, device=device)
+                    y = torch.randint(
+                        FLAGS.n_classes, (FLAGS.D_batch_size,), device=device)
+                    pred_real, pred_fake = net_GD(z, y, x_real, y_real)
+                    loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
+                    if FLAGS.cr > 0:
+                        loss_cr = consistency_loss(
+                            net_D, x_real, y_real, pred_real)
+                    else:
+                        loss_cr = torch.tensor(0.)
+                    loss_all = loss + FLAGS.cr * loss_cr
+                    loss_all = loss_all / FLAGS.D_accumulation
+                    loss_all.backward()
+
+                    loss_sum += loss.cpu().item()
+                    loss_real_sum += loss_real.cpu().item()
+                    loss_fake_sum += loss_fake.cpu().item()
+                    loss_cr_sum += loss_cr.cpu().item()
                 optim_D.step()
 
-                loss_sum += loss.cpu().item()
-                loss_real_sum += loss_real.cpu().item()
-                loss_fake_sum += loss_fake.cpu().item()
-                loss_cr_sum += loss_cr.cpu().item()
-            set_grad(net_G, True)
-
-            loss = loss_sum / FLAGS.n_dis
-            loss_real = loss_real_sum / FLAGS.n_dis
-            loss_fake = loss_fake_sum / FLAGS.n_dis
-            loss_cr = loss_cr_sum / FLAGS.n_dis
+            loss = loss_sum / FLAGS.n_dis / FLAGS.D_accumulation
+            loss_real = loss_real_sum / FLAGS.n_dis / FLAGS.D_accumulation
+            loss_fake = loss_fake_sum / FLAGS.n_dis / FLAGS.D_accumulation
+            loss_cr = loss_cr_sum / FLAGS.n_dis / FLAGS.D_accumulation
 
             writer.add_scalar('loss', loss, step)
             writer.add_scalar('loss_real', loss_real, step)
@@ -271,16 +283,16 @@ def train():
                 loss_fake='%.3f' % loss_fake)
 
             # Generator
-            set_grad(net_D, False)
             optim_G.zero_grad()
-            z = torch.randn(
-                FLAGS.G_batch_size, FLAGS.z_dim, device=device)
-            y = torch.randint(
-                FLAGS.n_classes, (FLAGS.G_batch_size,), device=device)
-            loss = loss_fn(net_GD(z, y))
-            loss.backward()
+            with module_no_grad(net_D):
+                for _ in range(FLAGS.G_accumulation):
+                    z = torch.randn(
+                        FLAGS.G_batch_size, FLAGS.z_dim, device=device)
+                    y = torch.randint(
+                        FLAGS.n_classes, (FLAGS.G_batch_size,), device=device)
+                    loss = loss_fn(net_GD(z, y)) / FLAGS.G_accumulation
+                    loss.backward()
             optim_G.step()
-            set_grad(net_D, True)
 
             # scheduler
             sched_G.step()
