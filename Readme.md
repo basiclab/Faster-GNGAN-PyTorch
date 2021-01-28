@@ -37,7 +37,6 @@ The author's official implementation of GN-GAN.
 
 - [LSUN Church Outdoor](https://www.yf.io/p/lsun) 128x128
 
-    Please manually split dataset into 27k for training and 3k for testing. The
     Folder structure is as follows:
     ```
     data/lsun/
