@@ -8,8 +8,8 @@ class BCEWithLogits(nn.BCEWithLogitsLoss):
         super().__init__()
         self.scale = scale
 
-    def forward(self, pred_real, pred_fake=None):
-        if pred_fake is not None:
+    def forward(self, pred_fake, pred_real=None):
+        if pred_real is not None:
             loss_real = super().forward(
                 self.scale * pred_real, torch.ones_like(pred_real))
             loss_fake = super().forward(
@@ -18,7 +18,7 @@ class BCEWithLogits(nn.BCEWithLogitsLoss):
             return loss, loss_real, loss_fake
         else:
             loss = super().forward(
-                self.scale * pred_real, torch.ones_like(pred_real))
+                self.scale * pred_fake, torch.ones_like(pred_fake))
             return loss
 
 
@@ -27,14 +27,14 @@ class HingeLoss(nn.Module):
         super().__init__()
         self.scale = scale
 
-    def forward(self, pred_real, pred_fake=None):
-        if pred_fake is not None:
+    def forward(self, pred_fake, pred_real=None):
+        if pred_real is not None:
             loss_real = F.relu(1 - self.scale * pred_real).mean()
             loss_fake = F.relu(1 + self.scale * pred_fake).mean()
             loss = loss_real + loss_fake
             return loss, loss_real, loss_fake
         else:
-            loss = -pred_real.mean()
+            loss = -pred_fake.mean()
             return loss
 
 
