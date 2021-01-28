@@ -2,40 +2,23 @@
 .vscode
 
 # python
-*venv*
 __pycache__
 .ipynb_checkpoints
 .python-version
 
 # log
 logs
-logs_backup
-pretrain
-*.zip
 
 # data
 data
 stats
-*.png
-_cache_*
 
 # readme figure
+figures
 !figures/cifar10_res_cr.png
 !figures/cifar10_biggan_10x10.png
 !figures/celebhq128_3x3.png
 !figures/lsun_church128_3x3.png
 
-# pdf
-*.pdf
-
-# model
-*.pt
-
 # temporary scripts
-*.py
 *.sh
-!*/**/*.py
-
-!eval_*.sh
-!sample_grid.py
-!sample_grid_with_select.py
