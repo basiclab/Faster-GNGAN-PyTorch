@@ -9,7 +9,7 @@
 --ema_start=20000
 --eval_step=2000
 --eval_use_torch
---fid_cache=./stats/imagenet_train128.npz
+--fid_ref=./stats/imagenet_train128.npz
 --logdir=./logs/GN-GAN_IMAGENET128_RES_bs256_0
 --lr_decay_start=200000
 --n_dis=5

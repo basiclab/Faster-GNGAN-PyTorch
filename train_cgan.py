@@ -15,8 +15,8 @@ from tqdm import trange
 from source.models import gn_biggan, sn_biggan, gn_gan
 from source.losses import HingeLoss
 from source.datasets import get_dataset
-from source.score.score import get_inception_and_fid_score
 from source.utils import module_no_grad, infiniteloop, set_seed
+from metrics.score.both import get_inception_and_fid_score
 
 
 archs = {
@@ -33,25 +33,26 @@ datasets = ['cifar10', 'imagenet128', 'imagenet128.hdf5']
 FLAGS = flags.FLAGS
 # resume
 flags.DEFINE_bool('resume', False, 'resume from logdir')
+flags.DEFINE_enum('resume_type', 'last', ['last', 'best'], 'resume type')
 # model and training
-flags.DEFINE_enum('dataset', 'cifar10', datasets, "dataset")
-flags.DEFINE_enum('arch', 'gn-biggan32', archs.keys(), "architecture")
+flags.DEFINE_enum('dataset', 'cifar10', datasets, "select dataset")
+flags.DEFINE_enum('arch', 'gn-biggan32', archs.keys(), "model architecture")
 flags.DEFINE_integer('ch', 64, 'base channel size of BigGAN')
 flags.DEFINE_integer('n_classes', 10, 'the number of classes in dataset')
-flags.DEFINE_integer('total_steps', 125000, "total number of training steps")
-flags.DEFINE_integer('lr_decay_start', 125000, 'apply linearly decay to lr')
+flags.DEFINE_integer('total_steps', 125000, "the number of training steps")
+flags.DEFINE_integer('lr_decay_start', 125000, 'linear decay start step')
 flags.DEFINE_integer('G_batch_size', 50, "batch size")
 flags.DEFINE_integer('D_batch_size', 50, "batch size")
 flags.DEFINE_integer('num_workers', 8, "dataloader workers")
-flags.DEFINE_integer('G_accumulation', 1, 'gradient accumulation for net_G')
+flags.DEFINE_integer('G_accumulation', 1, 'gradient accumulation for G')
 flags.DEFINE_integer('D_accumulation', 1, 'gradient accumulation for D')
 flags.DEFINE_float('G_lr', 1e-4, "Generator learning rate")
 flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
 flags.DEFINE_float('eps', 1e-8, "for Adam")
 flags.DEFINE_multi_float('betas', [0.0, 0.999], "for Adam")
-flags.DEFINE_integer('n_dis', 4, "update Generator every this steps")
+flags.DEFINE_integer('n_dis', 4, "update generator every `n_dis` steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
-flags.DEFINE_float('scale', 1., "scale up discriminator output")
+flags.DEFINE_float('scale', 1., "scale the output value of discriminator")
 flags.DEFINE_float('cr', 0, "weight for consistency regularization")
 flags.DEFINE_bool('parallel', False, 'multi-gpu training')
 flags.DEFINE_integer('seed', 0, "random seed")
@@ -59,14 +60,14 @@ flags.DEFINE_integer('seed', 0, "random seed")
 flags.DEFINE_float('ema_decay', 0.9999, "ema decay rate")
 flags.DEFINE_integer('ema_start', 1000, "start step for ema")
 # logging
-flags.DEFINE_bool('eval_use_torch', False, 'calculate IS and FID on gpu')
-flags.DEFINE_integer('eval_step', 1000, "evaluate FID and Inception Score")
-flags.DEFINE_integer('save_step', 10000, "save model every this step")
-flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
-flags.DEFINE_integer('sample_size', 64, "sampling size of images")
 flags.DEFINE_string('logdir', './logs/GN-cGAN_CIFAR10_BIGGAN_0', 'log folder')
-flags.DEFINE_string('fid_cache', './stats/cifar10_test.npz', 'FID cache')
-flags.DEFINE_integer('num_images', 10000, 'the number of generated images')
+flags.DEFINE_string('fid_ref', './stats/cifar10_test.npz', 'FID reference')
+flags.DEFINE_bool('eval_use_torch', False, 'calculate IS and FID on gpu')
+flags.DEFINE_integer('eval_step', 1000, "evaluation frequency")
+flags.DEFINE_integer('save_step', 10000, "saving frequency")
+flags.DEFINE_integer('num_images', 10000, "evaluation images")
+flags.DEFINE_integer('sample_step', 500, "sampling frequency")
+flags.DEFINE_integer('sample_size', 64, "the number of sampling images")
 # generate sample
 flags.DEFINE_bool('generate', False, 'generate images from pretrain model')
 
@@ -131,7 +132,10 @@ class Trainer:
 
         self.writer = SummaryWriter(FLAGS.logdir)
         if FLAGS.resume:
-            ckpt = torch.load(os.path.join(FLAGS.logdir, 'model.pt'))
+            if FLAGS.resume_type == 'last':
+                ckpt = torch.load(os.path.join(FLAGS.logdir, 'model.pt'))
+            else:
+                ckpt = torch.load(os.path.join(FLAGS.logdir, 'best_model.pt'))
             self.net_G.load_state_dict(ckpt['net_G'])
             self.net_D.load_state_dict(ckpt['net_D'])
             self.ema_G.load_state_dict(ckpt['ema_G'])
@@ -179,6 +183,7 @@ class Trainer:
     def generate(self):
         _, _, images = self.calc_metrics(self.ema_G)
         path = os.path.join(FLAGS.logdir, 'generate')
+        os.makedirs(path, exist_ok=True)
         for i in trange(len(images), dynamic_ncols=True, desc="save images"):
             image = torch.tensor(images[i])
             save_image(image, os.path.join(path, '%d.png' % i))
@@ -194,8 +199,8 @@ class Trainer:
                 for name, value in metrics.items():
                     self.writer.add_scalar(name, value, step)
                 pbar.set_postfix_str(
-                    "loss_real={loss_real: .3f}, "
-                    "loss_real={loss_fake: .3f}".format(**metrics))
+                    "loss_real={loss_real:.3f}, "
+                    "loss_fake={loss_fake:.3f}".format(**metrics))
 
                 self.ema(step)
 
@@ -248,10 +253,12 @@ class Trainer:
                 loss_cr_sum += loss_cr.cpu().item()
             self.optim_D.step()
 
-        loss = loss_sum / FLAGS.n_dis / FLAGS.D_accumulation
-        loss_real = loss_real_sum / FLAGS.n_dis / FLAGS.D_accumulation
-        loss_fake = loss_fake_sum / FLAGS.n_dis / FLAGS.D_accumulation
-        loss_cr = loss_cr_sum / FLAGS.n_dis / FLAGS.D_accumulation
+        metrics = {
+            'loss': loss_sum / FLAGS.n_dis / FLAGS.D_accumulation,
+            'loss_real': loss_real_sum / FLAGS.n_dis / FLAGS.D_accumulation,
+            'loss_fake': loss_fake_sum / FLAGS.n_dis / FLAGS.D_accumulation,
+            'loss_cr': loss_cr_sum / FLAGS.n_dis / FLAGS.D_accumulation,
+        }
 
         # train Generator
         self.optim_G.zero_grad()
@@ -266,9 +273,7 @@ class Trainer:
         self.sched_G.step()
         self.sched_D.step()
 
-        return {
-            'loss': loss, 'loss_real': loss_real, 'loss_fake': loss_fake,
-            'loss_cr': loss_cr}
+        return metrics
 
     def eval(self, step, pbar):
         net_IS, net_FID, _ = self.calc_metrics(self.net_G)
@@ -299,6 +304,7 @@ class Trainer:
         if save_as_best:
             torch.save(
                 ckpt, os.path.join(FLAGS.logdir, 'best_model.pt'))
+        torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
         metrics = {
             'IS': net_IS[0],
             'IS_std': net_IS[1],
@@ -347,7 +353,7 @@ class Trainer:
                 images[start: start + len(batch_images)] = batch_images
         images = (images.numpy() + 1) / 2
         (IS, IS_std), FID = get_inception_and_fid_score(
-            images, FLAGS.fid_cache,
+            images, FLAGS.fid_ref,
             num_images=FLAGS.num_images,
             use_torch=FLAGS.eval_use_torch,
             verbose=True,

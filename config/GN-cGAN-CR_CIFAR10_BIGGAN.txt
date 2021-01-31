@@ -15,7 +15,7 @@
 --eps=1e-8
 --eval_step=5000
 --eval_use_torch
---fid_cache=./stats/cifar10_test.npz
+--fid_ref=./stats/cifar10_test.npz
 --logdir=./logs/GN-cGAN-CR_CIFAR10_BIGGAN_0
 --lr_decay_start=125000
 --n_classes=10

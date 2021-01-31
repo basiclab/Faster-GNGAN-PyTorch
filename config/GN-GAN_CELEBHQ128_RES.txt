@@ -9,7 +9,7 @@
 --ema_start=20000
 --eval_step=2000
 --eval_use_torch
---fid_cache=./stats/celebhq_val128.npz
+--fid_ref=./stats/celebhq_val128.npz
 --logdir=./logs/GN-GAN_CELEBHQ128_RES_0
 --lr_decay_start=100000
 --n_dis=5

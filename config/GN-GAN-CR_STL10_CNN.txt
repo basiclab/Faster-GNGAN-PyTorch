@@ -4,8 +4,9 @@
 --batch_size=64
 --cr=5
 --dataset=stl10
+--eval_in_eval_mode
 --eval_use_torch
---fid_cache=./stats/stl10_unlabeled48.npz
+--fid_ref=./stats/stl10_unlabeled48.npz
 --logdir=./logs/GN-GAN-CR_STL10_CNN_0
 --loss=bce
 --lr_decay_start=200000

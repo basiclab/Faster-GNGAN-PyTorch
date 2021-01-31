@@ -14,7 +14,7 @@
 --eps=1e-6
 --eval_step=1000
 --eval_use_torch
---fid_cache=./stats/imagenet_train128.npz
+--fid_ref=./stats/imagenet_train128.npz
 --logdir=./logs/GN-BIGGAN_IMAGENET128_0_ch64_bs32x2
 --lr_decay_start=200000
 --n_classes=1000

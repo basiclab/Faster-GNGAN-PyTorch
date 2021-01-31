@@ -4,8 +4,9 @@
 --batch_size=64
 --cr=5
 --dataset=cifar10
+--eval_in_eval_mode
 --eval_use_torch
---fid_cache=./stats/cifar10_test.npz
+--fid_ref=./stats/cifar10_test.npz
 --logdir=./logs/GN-GAN-CR_CIFAR10_CNN_0
 --loss=bce
 --lr_decay_start=200000
