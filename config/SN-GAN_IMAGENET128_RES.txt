@@ -13,6 +13,7 @@
 --logdir=./logs/SN-GAN_IMAGENET128_RES_0
 --lr_decay_start=400000
 --n_dis=5
+--generate_use_eam
 --num_images=10000
 --num_workers=0
 --sample_size=64

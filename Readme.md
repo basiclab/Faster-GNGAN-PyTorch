@@ -2,8 +2,15 @@
 
 The author's official implementation of GN-GAN.
 
-## Requirements
-- Python 3.6
+## Setup & Requirements
+- Clone project
+    ```
+    git clone https://github.com/w86763777/pytorch-gngan.git
+    cd pytorch-gngan
+    git submodule init
+    git submodule update
+    ```
+- We use python 3.6
 - Install python packages
     ```bash
     pip install -U pip setuptools

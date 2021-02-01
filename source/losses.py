@@ -22,6 +22,24 @@ class BCEWithLogits(nn.BCEWithLogitsLoss):
             return loss
 
 
+class BCEWithoutLogits(nn.BCELoss):
+    def __init__(self, scale=1):
+        super().__init__()
+
+    def forward(self, pred_fake, pred_real=None):
+        if pred_real is not None:
+            pred_real = (pred_real + 1) / 2
+            pred_fake = (pred_fake + 1) / 2
+            loss_real = super().forward(pred_real, torch.ones_like(pred_real))
+            loss_fake = super().forward(pred_fake, torch.zeros_like(pred_fake))
+            loss = loss_real + loss_fake
+            return loss, loss_real, loss_fake
+        else:
+            pred_fake = (pred_fake + 1) / 2
+            loss = super().forward(pred_fake, torch.ones_like(pred_fake))
+            return loss
+
+
 class HingeLoss(nn.Module):
     def __init__(self, scale=1):
         super().__init__()

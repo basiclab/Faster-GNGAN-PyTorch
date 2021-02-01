@@ -11,6 +11,7 @@
 --loss=bce
 --lr_decay_start=200000
 --n_dis=1
+--nogenerate_use_eam
 --num_images=50000
 --sample_size=64
 --sample_step=500
