@@ -315,7 +315,9 @@ class Trainer:
         }
         pbar.write(
             "%d/%d " % (step, FLAGS.total_steps) +
-            ", ".join('%s:%.2f' % (k, v) for k, v in metrics.items()))
+            "IS: %.2f(%.2f), FID: %.2f, IS_EMA: %.2f(%.2f), FID_EMA: %.2f" % (
+                metrics['IS'], metrics['IS_std'], metrics['FID'],
+                metrics['IS_EMA'], metrics['IS_std_EMA'], metrics['FID_EMA']))
         for name, value in metrics.items():
             self.writer.add_scalar(name, value, step)
         self.writer.flush()

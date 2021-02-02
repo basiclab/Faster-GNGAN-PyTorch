@@ -15,7 +15,7 @@ from tqdm import trange
 from source.models import sn_gan, gn_gan
 from source.losses import HingeLoss, BCEWithLogits, BCEWithoutLogits
 from source.datasets import get_dataset
-from source.utils import module_no_grad, infiniteloop, set_seed
+from source.utils import infiniteloop, set_seed
 from metrics.score.both import get_inception_and_fid_score
 
 
@@ -44,6 +44,8 @@ datasets = [
     'celebhq128', 'celebhq128.hdf5',
     'lsun_church_outdoor', 'lsun_church_outdoor.hdf5'
 ]
+
+device = torch.device('cuda:0')
 
 
 FLAGS = flags.FLAGS
@@ -86,8 +88,6 @@ flags.DEFINE_integer('sample_size', 64, "the number of sampling images")
 flags.DEFINE_bool('generate', False, 'generate images from pretrain model')
 flags.DEFINE_bool('generate_use_eam', False, 'use ema model')
 
-device = torch.device('cuda:0')
-
 
 class GeneratorDiscriminator(torch.nn.Module):
     def __init__(self, net_G, net_D):
@@ -111,7 +111,6 @@ class GeneratorDiscriminator(torch.nn.Module):
 
 class Trainer:
     def __init__(self):
-        torch.cuda.set_device(0)
         dataset = get_dataset(FLAGS.dataset)
         self.dataloader = torch.utils.data.DataLoader(
             dataset,
@@ -125,10 +124,10 @@ class Trainer:
         self.net_D = Discriminator().to(device)
         if FLAGS.arch.startswith('gn'):
             self.net_D = gn_gan.GradNorm(self.net_D)
-        self.net_GD = GeneratorDiscriminator(self.net_G, self.net_D)
+        # self.net_GD = GeneratorDiscriminator(self.net_G, self.net_D)
 
-        if FLAGS.parallel:
-            self.net_GD = torch.nn.DataParallel(self.net_GD)
+        # if FLAGS.parallel:
+        #     self.net_GD = torch.nn.DataParallel(self.net_GD)
 
         # ema
         self.ema(step=0)
@@ -165,7 +164,8 @@ class Trainer:
             del ckpt
         else:
             os.makedirs(os.path.join(FLAGS.logdir, 'sample'))
-            self.fixed_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).cuda()
+            self.fixed_z = torch.randn(
+                FLAGS.sample_size, FLAGS.z_dim, device=device)
             self.fixed_z = torch.split(self.fixed_z, FLAGS.batch_size, dim=0)
             with open(os.path.join(FLAGS.logdir, "flagfile.txt"), 'w') as f:
                 f.write(FLAGS.flags_into_string())
@@ -197,6 +197,7 @@ class Trainer:
         else:
             _, _, images = self.calc_metrics(self.net_G)
         path = os.path.join(FLAGS.logdir, 'generate')
+        os.makedirs(path, exist_ok=True)
         for i in trange(len(images), dynamic_ncols=True, desc="save images"):
             image = torch.tensor(images[i])
             save_image(image, os.path.join(path, '%d.png' % i))
@@ -238,16 +239,19 @@ class Trainer:
         loss_real_sum = 0
         loss_fake_sum = 0
         loss_cr_sum = 0
-        self.net_GD.train()
+        # self.net_GD.train()
 
         # Discriminator
         x = iter(torch.split(x, FLAGS.batch_size))
         for _ in range(FLAGS.n_dis):
             self.optim_D.zero_grad()
             for _ in range(FLAGS.D_accumulation):
+                with torch.no_grad():
+                    z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
+                    fake = self.net_G(z).detach()
                 real = next(x).to(device)
-                z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).cuda()
-                pred_real, pred_fake = self.net_GD(z, real)
+                pred_real = self.net_D(real)
+                pred_fake = self.net_D(fake)
                 loss, loss_real, loss_fake = self.loss_fn(pred_fake, pred_real)
                 if FLAGS.cr > 0:
                     loss_cr = self.consistency_loss(real, pred_real)
@@ -272,11 +276,11 @@ class Trainer:
 
         # Generator
         self.optim_G.zero_grad()
-        with module_no_grad(self.net_D):
-            for _ in range(FLAGS.G_accumulation):
-                z = torch.randn(2 * FLAGS.batch_size, FLAGS.z_dim).cuda()
-                loss = self.loss_fn(self.net_GD(z)) / FLAGS.G_accumulation
-                loss.backward()
+        for _ in range(FLAGS.G_accumulation):
+            z = torch.randn(2 * FLAGS.batch_size, FLAGS.z_dim, device=device)
+            loss = self.loss_fn(self.net_D(self.net_G(z)))
+            loss = loss / FLAGS.G_accumulation
+            loss.backward()
         self.optim_G.step()
 
         return metrics
@@ -320,7 +324,9 @@ class Trainer:
         }
         pbar.write(
             "%d/%d " % (step, FLAGS.total_steps) +
-            ", ".join('%s:%.2f' % (k, v) for k, v in metrics.items()))
+            "IS: %.2f(%.2f), FID: %.2f, IS_EMA: %.2f(%.2f), FID_EMA: %.2f" % (
+                metrics['IS'], metrics['IS_std'], metrics['FID'],
+                metrics['IS_EMA'], metrics['IS_std_EMA'], metrics['FID_EMA']))
         for name, value in metrics.items():
             self.writer.add_scalar(name, value, step)
         self.writer.flush()
@@ -351,7 +357,7 @@ class Trainer:
             for start in trange(0, FLAGS.num_images, FLAGS.batch_size,
                                 dynamic_ncols=True, leave=False):
                 batch_size = min(FLAGS.batch_size, FLAGS.num_images - start)
-                z = torch.randn(batch_size, FLAGS.z_dim).cuda()
+                z = torch.randn(batch_size, FLAGS.z_dim, device=device)
                 batch_images = net_G(z).cpu()
                 if images is None:
                     _, C, H, W = batch_images.shape
@@ -364,13 +370,15 @@ class Trainer:
             use_torch=FLAGS.eval_use_torch,
             verbose=True,
             parallel=FLAGS.parallel)
+        if FLAGS.eval_in_eval_mode:
+            net_G.train()
         return (IS, IS_std), FID, images
 
     def consistency_loss(self, x, pred):
         aug_x = x.detach().clone().cpu()
         for idx, img in enumerate(aug_x):
             aug_x[idx] = self.cr_transforms(img)
-        aug_x = aug_x.cuda()
+        aug_x = aug_x.to(device)
         loss = ((self.net_D(aug_x) - pred) ** 2).mean()
         return loss
 
