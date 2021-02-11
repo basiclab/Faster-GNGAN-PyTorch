@@ -19,7 +19,7 @@
 --lr_decay_start=125000
 --n_classes=10
 --n_dis=4
---generate_use_eam
+--generate_use_ema
 --num_images=10000
 --num_workers=8
 --sample_size=64

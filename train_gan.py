@@ -56,14 +56,14 @@ flags.DEFINE_enum('resume_type', 'last', ['last', 'best'], 'resume type')
 flags.DEFINE_enum('dataset', 'cifar10', datasets, "select dataset")
 flags.DEFINE_enum('arch', 'gn-res32', archs.keys(), "model architecture")
 flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
-flags.DEFINE_integer('total_steps', 100000, "the number of training steps")
-flags.DEFINE_integer('lr_decay_start', 100000, 'linear decay start step')
-flags.DEFINE_integer('batch_size', 16, "batch size")
+flags.DEFINE_integer('total_steps', 200000, "the number of training steps")
+flags.DEFINE_integer('lr_decay_start', 0, 'linear decay start step')
+flags.DEFINE_integer('batch_size', 64, "batch size")
 flags.DEFINE_integer('num_workers', 8, "dataloader workers")
 flags.DEFINE_integer('G_accumulation', 1, 'gradient accumulation for G')
 flags.DEFINE_integer('D_accumulation', 1, 'gradient accumulation for D')
 flags.DEFINE_float('G_lr', 2e-4, "generator learning rate")
-flags.DEFINE_float('D_lr', 2e-4, "discriminator learning rate")
+flags.DEFINE_float('D_lr', 4e-4, "discriminator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update generator every `n_dis` steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
@@ -73,10 +73,10 @@ flags.DEFINE_bool('parallel', False, 'multi-gpu training')
 flags.DEFINE_integer('seed', 0, "random seed")
 # ema
 flags.DEFINE_float('ema_decay', 0.9999, "ema decay rate")
-flags.DEFINE_integer('ema_start', 5000, "start step for ema")
+flags.DEFINE_integer('ema_start', 0, "start step for ema")
 # logging
 flags.DEFINE_string('logdir', './logs/GN-GAN_CIFAR10_RES_0', 'log folder')
-flags.DEFINE_string('fid_ref', './stats/celebhq_val128.npz', 'FID reference')
+flags.DEFINE_string('fid_ref', './stats/cifar10_test.npz', 'FID reference')
 flags.DEFINE_bool('eval_use_torch', False, 'evaluate on GPU')
 flags.DEFINE_bool('eval_in_eval_mode', False, 'evaluate in eval mode')
 flags.DEFINE_integer('eval_step', 5000, "evaluation frequency")
@@ -86,7 +86,7 @@ flags.DEFINE_integer('sample_step', 500, "sampling frequency")
 flags.DEFINE_integer('sample_size', 64, "the number of sampling images")
 # generate
 flags.DEFINE_bool('generate', False, 'generate images from pretrain model')
-flags.DEFINE_bool('generate_use_eam', False, 'use ema model')
+flags.DEFINE_bool('generate_use_ema', False, 'use ema model')
 
 
 class GeneratorDiscriminator(torch.nn.Module):
@@ -192,7 +192,7 @@ class Trainer:
 
     # ========================= main tasks =========================
     def generate(self):
-        if FLAGS.generate_use_eam:
+        if FLAGS.generate_use_ema:
             _, _, images = self.calc_metrics(self.ema_G)
         else:
             _, _, images = self.calc_metrics(self.net_G)
@@ -204,7 +204,7 @@ class Trainer:
 
     def train(self):
         with trange(self.start, FLAGS.total_steps + 1, dynamic_ncols=True,
-                    initial=self.start, total=FLAGS.total_steps) as pbar:
+                    initial=self.start - 1, total=FLAGS.total_steps) as pbar:
             looper = infiniteloop(self.dataloader)
             for step in pbar:
                 x, _ = next(looper)
@@ -250,8 +250,9 @@ class Trainer:
                     z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
                     fake = self.net_G(z).detach()
                 real = next(x).to(device)
-                pred_real = self.net_D(real)
-                pred_fake = self.net_D(fake)
+                pred = self.net_D(torch.cat([real, fake]))
+                pred_real, pred_fake = torch.split(
+                    pred, [real.shape[0], fake.shape[0]])
                 loss, loss_real, loss_fake = self.loss_fn(pred_fake, pred_real)
                 if FLAGS.cr > 0:
                     loss_cr = self.consistency_loss(real, pred_real)
@@ -288,9 +289,13 @@ class Trainer:
     def eval(self, step, pbar):
         net_IS, net_FID, _ = self.calc_metrics(self.net_G)
         ema_IS, ema_FID, _ = self.calc_metrics(self.ema_G)
-        if not math.isnan(ema_FID) and ema_FID < self.best_FID:
-            self.best_IS = ema_IS
-            self.best_FID = ema_FID
+        if FLAGS.generate_use_ema:
+            IS, FID = ema_IS, ema_FID
+        else:
+            IS, FID = net_IS, net_FID
+        if not math.isnan(FID) and FID < self.best_FID:
+            self.best_IS = IS
+            self.best_FID = FID
             save_as_best = True
         else:
             save_as_best = False
@@ -350,8 +355,7 @@ class Trainer:
     def calc_metrics(self, net_G):
         if FLAGS.parallel:
             net_G = torch.nn.DataParallel(net_G)
-        if FLAGS.eval_in_eval_mode:
-            net_G.eval()
+        net_G.eval()
         images = None
         with torch.no_grad():
             for start in trange(0, FLAGS.num_images, FLAGS.batch_size,
@@ -365,13 +369,12 @@ class Trainer:
                 images[start: start + len(batch_images)] = batch_images
         images = (images.numpy() + 1) / 2
         (IS, IS_std), FID = get_inception_and_fid_score(
-            images, FLAGS.fid_ref,
+            images[:10000], FLAGS.fid_ref,
             num_images=FLAGS.num_images,
             use_torch=FLAGS.eval_use_torch,
             verbose=True,
             parallel=FLAGS.parallel)
-        if FLAGS.eval_in_eval_mode:
-            net_G.train()
+        net_G.train()
         return (IS, IS_std), FID, images
 
     def consistency_loss(self, x, pred):

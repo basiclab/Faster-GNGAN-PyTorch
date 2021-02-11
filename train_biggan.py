@@ -70,6 +70,7 @@ flags.DEFINE_integer('sample_step', 500, "sampling frequency")
 flags.DEFINE_integer('sample_size', 64, "the number of sampling images")
 # generate sample
 flags.DEFINE_bool('generate', False, 'generate images from pretrain model')
+flags.DEFINE_bool('generate_use_ema', False, 'use ema model')
 
 
 class GeneratorDiscriminator(torch.nn.Module):
@@ -181,7 +182,10 @@ class Trainer:
 
     # ========================= main tasks =========================
     def generate(self):
-        _, _, images = self.calc_metrics(self.ema_G)
+        if FLAGS.generate_use_ema:
+            _, _, images = self.calc_metrics(self.ema_G)
+        else:
+            _, _, images = self.calc_metrics(self.net_G)
         path = os.path.join(FLAGS.logdir, 'generate')
         os.makedirs(path, exist_ok=True)
         for i in trange(len(images), dynamic_ncols=True, desc="save images"):
@@ -190,7 +194,7 @@ class Trainer:
 
     def train(self):
         with trange(self.start, FLAGS.total_steps + 1, dynamic_ncols=True,
-                    initial=self.start, total=FLAGS.total_steps) as pbar:
+                    initial=self.start, total=FLAGS.total_steps + 1) as pbar:
             looper = infiniteloop(self.dataloader)
             for step in pbar:
                 x, y = next(looper)
