@@ -4,56 +4,55 @@ import torch.nn.functional as F
 
 
 class BCEWithLogits(nn.BCEWithLogitsLoss):
-    def __init__(self, scale=1):
-        super().__init__()
-        self.scale = scale
-
-    def forward(self, pred_fake, pred_real=None):
-        if pred_real is not None:
-            loss_real = super().forward(
-                self.scale * pred_real, torch.ones_like(pred_real))
-            loss_fake = super().forward(
-                self.scale * pred_fake, torch.zeros_like(pred_fake))
-            loss = loss_real + loss_fake
-            return loss, loss_real, loss_fake
-        else:
-            loss = super().forward(
-                self.scale * pred_fake, torch.ones_like(pred_fake))
-            return loss
-
-
-class BCEWithoutLogits(nn.BCELoss):
-    def __init__(self, scale=1):
-        super().__init__()
-
-    def forward(self, pred_fake, pred_real=None):
-        if pred_real is not None:
-            pred_real = (pred_real + 1) / 2
-            pred_fake = (pred_fake + 1) / 2
+    def forward(self, pred_real, pred_fake=None):
+        if pred_fake is not None:
             loss_real = super().forward(pred_real, torch.ones_like(pred_real))
             loss_fake = super().forward(pred_fake, torch.zeros_like(pred_fake))
             loss = loss_real + loss_fake
             return loss, loss_real, loss_fake
         else:
-            pred_fake = (pred_fake + 1) / 2
-            loss = super().forward(pred_fake, torch.ones_like(pred_fake))
+            loss = super().forward(pred_real, torch.ones_like(pred_real))
             return loss
 
 
 class HingeLoss(nn.Module):
-    def __init__(self, scale=1):
-        super().__init__()
-        self.scale = scale
-
-    def forward(self, pred_fake, pred_real=None):
-        if pred_real is not None:
-            loss_real = F.relu(1 - self.scale * pred_real).mean()
-            loss_fake = F.relu(1 + self.scale * pred_fake).mean()
+    def forward(self, pred_real, pred_fake=None):
+        if pred_fake is not None:
+            loss_real = F.relu(1 - pred_real).mean()
+            loss_fake = F.relu(1 + pred_fake).mean()
             loss = loss_real + loss_fake
             return loss, loss_real, loss_fake
         else:
-            loss = -pred_fake.mean()
+            loss = -pred_real.mean()
             return loss
+
+
+class Wasserstein(nn.Module):
+    def forward(self, pred_real, pred_fake=None):
+        if pred_fake is not None:
+            loss_real = pred_real.mean()
+            loss_fake = pred_fake.mean()
+            loss = -loss_real + loss_fake
+            return loss, loss_real, loss_fake
+        else:
+            loss = -pred_real.mean()
+            return loss
+
+
+class BCE(nn.BCELoss):
+    def forward(self, pred_real, pred_fake=None):
+        if pred_fake is not None:
+            loss_real = super().forward(
+                (pred_real + 1) / 2, torch.ones_like(pred_real))
+            loss_fake = super().forward(
+                (pred_fake + 1) / 2, torch.zeros_like(pred_fake))
+            loss = loss_real + loss_fake
+            return loss, loss_real, loss_fake
+        else:
+            loss = super().forward(
+                (pred_real + 1) / 2, torch.ones_like(pred_real))
+            return loss
+
 
 
 loss_fns = {

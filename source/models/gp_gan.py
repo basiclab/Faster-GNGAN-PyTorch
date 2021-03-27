@@ -1,9 +1,6 @@
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.init as init
-from torch.nn.utils.spectral_norm import spectral_norm
 
 
 class Generator(nn.Module):
@@ -14,19 +11,16 @@ class Generator(nn.Module):
         self.main = nn.Sequential(
             nn.BatchNorm2d(512),
             nn.ReLU(True),
-            nn.ConvTranspose2d(
-                512, 256, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(True),
-            nn.ConvTranspose2d(
-                256, 128, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(True),
-            nn.ConvTranspose2d(
-                128, 64, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(True),
-            nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1),
+            nn.ConvTranspose2d(64, 3, kernel_size=3, stride=1, padding=1),
             nn.Tanh())
         self.initialize()
 
@@ -43,8 +37,6 @@ class Generator(nn.Module):
         return x
 
 
-# In CR-SNGAN, the channel sizes are    [64, 128, 128, 256, 256, 512, 512]
-# In SNGAN, the channel sizes are       [64, 64, 128, 128, 256, 256, 512]
 class Discriminator(nn.Module):
     def __init__(self, M=32):
         super().__init__()
@@ -52,32 +44,25 @@ class Discriminator(nn.Module):
 
         self.main = nn.Sequential(
             # M
-            spectral_norm(
-                nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)),
+            nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1),
             nn.LeakyReLU(0.1, inplace=True),
-            spectral_norm(
-                nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1)),
+            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
             nn.LeakyReLU(0.1, inplace=True),
             # M / 2
-            spectral_norm(
-                nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1)),
+            nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
             nn.LeakyReLU(0.1, inplace=True),
-            spectral_norm(
-                nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1)),
+            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
             nn.LeakyReLU(0.1, inplace=True),
             # M / 4
-            spectral_norm(
-                nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)),
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
             nn.LeakyReLU(0.1, inplace=True),
-            spectral_norm(
-                nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1)),
+            nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),
             nn.LeakyReLU(0.1, inplace=True),
             # M / 8
-            spectral_norm(
-                nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1)),
+            nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
             nn.LeakyReLU(0.1, inplace=True))
 
-        self.linear = spectral_norm(nn.Linear(M // 8 * M // 8 * 512, 1))
+        self.linear = nn.Linear(M // 8 * M // 8 * 512, 1)
         self.initialize()
 
     def initialize(self):
@@ -114,24 +99,20 @@ class GenBlock(nn.Module):
         # residual
         self.residual = nn.Sequential(
             nn.BatchNorm2d(in_channels),
-            nn.ReLU(),
+            nn.ReLU(True),
             nn.Upsample(scale_factor=2),
             nn.Conv2d(in_channels, out_channels, 3, stride=1, padding=1),
             nn.BatchNorm2d(out_channels),
-            nn.ReLU(),
+            nn.ReLU(True),
             nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1),
         )
         # initialize weight
         self.initialize()
 
     def initialize(self):
-        for m in self.residual.modules():
+        for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                init.xavier_uniform_(m.weight, math.sqrt(2))
-                init.zeros_(m.bias)
-        for m in self.shortcut.modules():
-            if isinstance(m, nn.Conv2d):
-                init.xavier_uniform_(m.weight)
+                init.kaiming_normal_(m.weight)
                 init.zeros_(m.bias)
 
     def forward(self, x):
@@ -149,7 +130,7 @@ class ResGenerator32(nn.Module):
         )
         self.output = nn.Sequential(
             nn.BatchNorm2d(256),
-            nn.ReLU(),
+            nn.ReLU(True),
             nn.Conv2d(256, 3, 3, stride=1, padding=1),
             nn.Tanh(),
         )
@@ -157,11 +138,11 @@ class ResGenerator32(nn.Module):
         self.initialize()
 
     def initialize(self):
-        init.xavier_uniform_(self.linear.weight)
+        init.kaiming_normal_(self.linear.weight)
         init.zeros_(self.linear.bias)
         for m in self.output.modules():
             if isinstance(m, nn.Conv2d):
-                init.xavier_uniform_(m.weight)
+                init.kaiming_normal_(m.weight)
                 init.zeros_(m.bias)
 
     def forward(self, z):
@@ -176,24 +157,20 @@ class OptimizedDisblock(nn.Module):
         # shortcut
         self.shortcut = nn.Sequential(
             nn.AvgPool2d(2),
-            spectral_norm(nn.Conv2d(in_channels, out_channels, 1, 1, 0)))
+            nn.Conv2d(in_channels, out_channels, 1, 1, 0))
         # residual
         self.residual = nn.Sequential(
-            spectral_norm(nn.Conv2d(in_channels, out_channels, 3, 1, 1)),
-            nn.ReLU(),
-            spectral_norm(nn.Conv2d(out_channels, out_channels, 3, 1, 1)),
+            nn.Conv2d(in_channels, out_channels, 3, 1, 1),
+            nn.ReLU(True),
+            nn.Conv2d(out_channels, out_channels, 3, 1, 1),
             nn.AvgPool2d(2))
         # initialize weight
         self.initialize()
 
     def initialize(self):
-        for m in self.residual.modules():
+        for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                init.xavier_uniform_(m.weight, math.sqrt(2))
-                init.zeros_(m.bias)
-        for m in self.shortcut.modules():
-            if isinstance(m, nn.Conv2d):
-                init.xavier_uniform_(m.weight)
+                init.kaiming_normal_(m.weight)
                 init.zeros_(m.bias)
 
     def forward(self, x):
@@ -206,17 +183,17 @@ class DisBlock(nn.Module):
         # shortcut
         shortcut = []
         if in_channels != out_channels or down:
-            shortcut.append(spectral_norm(
-                nn.Conv2d(in_channels, out_channels, 1, 1, 0)))
+            shortcut.append(
+                nn.Conv2d(in_channels, out_channels, 1, 1, 0))
         if down:
             shortcut.append(nn.AvgPool2d(2))
         self.shortcut = nn.Sequential(*shortcut)
         # residual
         residual = [
             nn.ReLU(),
-            spectral_norm(nn.Conv2d(in_channels, out_channels, 3, 1, 1)),
-            nn.ReLU(),
-            spectral_norm(nn.Conv2d(out_channels, out_channels, 3, 1, 1)),
+            nn.Conv2d(in_channels, out_channels, 3, 1, 1),
+            nn.ReLU(True),
+            nn.Conv2d(out_channels, out_channels, 3, 1, 1),
         ]
         if down:
             residual.append(nn.AvgPool2d(2))
@@ -225,13 +202,9 @@ class DisBlock(nn.Module):
         self.initialize()
 
     def initialize(self):
-        for m in self.residual.modules():
+        for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                init.xavier_uniform_(m.weight, math.sqrt(2))
-                init.zeros_(m.bias)
-        for m in self.shortcut.modules():
-            if isinstance(m, nn.Conv2d):
-                init.xavier_uniform_(m.weight)
+                init.kaiming_normal_(m.weight)
                 init.zeros_(m.bias)
 
     def forward(self, x):
@@ -246,14 +219,18 @@ class ResDiscriminator32(nn.Module):
             DisBlock(128, 128, down=True),
             DisBlock(128, 128),
             DisBlock(128, 128),
-            nn.ReLU(inplace=True))
-        self.linear = spectral_norm(nn.Linear(128, 1, bias=False))
+            nn.ReLU(True),
+            nn.AdaptiveAvgPool2d((1, 1)))
+        self.linear = nn.Linear(128, 1)
+        # initialize weight
         self.initialize()
 
     def initialize(self):
-        init.xavier_uniform_(self.linear.weight)
+        init.kaiming_normal_(self.linear.weight)
+        init.zeros_(self.linear.bias)
 
     def forward(self, x):
-        x = self.model(x).sum(dim=[2, 3])
+        x = self.model(x)
+        x = torch.flatten(x, start_dim=1)
         x = self.linear(x)
         return x

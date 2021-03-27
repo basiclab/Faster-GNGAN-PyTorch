@@ -2,17 +2,12 @@
 
 The author's official implementation of GN-GAN.
 
-## Setup & Requirements
-- Clone project
+## System Requirements
+- CUDA 10.2
+- CUDNN 7.5.x
+- Python 3.6.9
+- Python packages
     ```
-    git clone https://github.com/w86763777/pytorch-gngan.git
-    cd pytorch-gngan
-    git submodule init
-    git submodule update
-    ```
-- We use python 3.6
-- Install python packages
-    ```bash
     pip install -U pip setuptools
     pip install -r requirements.txt
     ```
@@ -20,80 +15,80 @@ The author's official implementation of GN-GAN.
 ## Datasets
 - CIFAR-10
 
-    We use Pytorch build-in CIFAR-10.
+    Pytorch build-in CIFAR-10 will be automatically downloaded.
 
 - STL-10
 
-    We use Pytorch build-in STL-10.
+    Pytorch build-in STL-10 will be automatically downloaded.
 
-- CelebA-HQ 128x128
+- CelebA-HQ 256x256
 
-    Please manually split dataset into 27k for training and 3k for testing. The
-    Folder structure is as follows:
+    Unzip dataset and create folder follow the structer as below.
     ```
-    data/celebhq
-    ├── train128
-    │   └── dummy
-    │       ├── 00001.jpg
-    │       ├── ...
-    └── val128
-        └── dummy
-            ├── 27001.jpg
-            ├── ...
+    ./data/celebhq/dummy
+    ├── 00001.jpg
+    ├── 00002.jpg
+    ├── ...
+    └── 30000.jpg
     ```
 
-- [LSUN Church Outdoor](https://www.yf.io/p/lsun) 128x128
+- [LSUN Church Outdoor](https://www.yf.io/p/lsun) 256x256
 
-    Folder structure is as follows:
+    Unzip dataset and create folder follow the structer 
     ```
-    data/lsun/
-    ├── church_outdoor_train_lmdb
-    │   ├── data.mdb
-    │   └── lock.mdb
-    └── church_outdoor_val_lmdb
-        ├── data.mdb
-        └── lock.mdb
+    ./data/lsun/church_outdoor_train_lmdb/
+    ├── data.mdb
+    └── lock.mdb
     ```
 
-## How to Run
-- There are 3 training scripts in `gans`, i.e., `train_gan.py`, `train_cgan.py` and `train_gan128.py`. Following is the Table of compatible configuration.
+- Preprocess CelebA-HQ and LSUN Church Outdoor for speeding up IO
+    ```
+    python source/dataset.py
+    ```
 
-    |script         |configurations|
-    |---------------|--------------|
-    |train_gan.py   |`GN-GAN_CIFAR10_CNN.txt`,<br>`GN-GAN_CIFAR10_RES.txt`,<br>`GN-GAN_STL10_CNN.txt`,<br>`GN-GAN_STL10_RES.txt`,<br>`GN-GAN-CR_CIFAR10_CNN.txt`,<br>`GN-GAN-CR_CIFAR10_RES.txt`,<br>`GN-GAN-CR_STL10_CNN.txt`,<br>`GN-GAN-CR_STL10_RES.txt`|
-    |train_cgan.py  |`GN-cGAN_CIFAR10_BIGGAN.txt`|
-    |train_gan128.py|`GN-GAN_CELEBHQ128_RES.txt`,<br>`GN-GAN_CHURCH128_RES.txt`|
+## Statistic for FID
+Please follow the `metrics/Readme.md` to create following 5 statistics:
+- cifar10.train.npz - Training set of CIFAR10
+- cifar10.train.npz - Testing set of CIFAR10
+- stl10.unlabeled.48.npz - Unlabeled set of STL10 in resolution 48x48
+- church_outdoor.train.256.npz - Center Cropped training set of LSUN Church Outdoor
+- celebhq.all.256.npz - Full dataset of CelebA-HQ 256x256
 
-- Run the script with the compatible configuration, i.e.,
+Then, create `stats` and put all above 5 statistics to `./stats`.
+
+
+## How to Training
+- There are 3 training scripts , i.e.,
+    - `train_gan.py`
+    - `train_gan_large_dist.py`
+    - `train_cgan.py`
+    
+    Training configurations are located in `./config`. Moreover, the following table is the compatible configuration list.
+
+    |Script           |Configurations|Multi-GPU|
+    |-----------------|--------------|:-------:|
+    |`train_gan.py`   |`GN-GAN_CIFAR10_CNN.txt`,<br>`GN-GAN_CIFAR10_RES.txt`,<br>`GN-GAN_STL10_CNN.txt`,<br>`GN-GAN_STL10_RES.txt`,<br>`GN-GAN-CR_CIFAR10_CNN.txt`,<br>`GN-GAN-CR_CIFAR10_RES.txt`,<br>`GN-GAN-CR_STL10_CNN.txt`,<br>`GN-GAN-CR_STL10_RES.txt`||
+    |`train_gan_large_dist.py`|`GN-GAN_CELEBHQ256_RES.txt`,<br>`GN-GAN_CHURCH256_RES.txt`|:heavy_check_mark:|
+    |`train_cgan.py`  |`GN-cGAN_CIFAR10_BIGGAN.txt`,<br>`GN-cGAN-CR_CIFAR10_BIGGAN.txt`||
+
+- Run the training script with the compatible configuration, e.g.,
+    ```
+    python train_gan.py \
+        --flagfile ./config/GN-GAN_CIFAR10_RES.txt \
+        --logdir ./logs/GN-GAN_CIFAR10_RES
+    ```
+    ```
+    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python train_gan_large_dist.py \
+        --flagfile ./config/GN-GAN_CELEBHQ256_RES.txt \
+        --logdir ./logs/GN-GAN_CELEBHQ256_RES_0
+    ```
+
+- Generate images from pretrained model, e.g.,
     ```
     python gans/train_gan.py \
-        --flagfile ./config/GN-GAN-CR_CIFAR10_RES.txt \
-        --logdir ./logs/GN-GAN-CR_CIFAR10_RES
-    ```
-
-- Generate images from pretrained model.
-
-    For example,
-    ```
-    python gans/train_gan.py \
-        --flagfile ./logs/GN-GAN-CR_CIFAR10_RES/flagfile.txt \
+        --flagfile ./logs/GN-GAN_CIFAR10_RES/flagfile.txt \
         --generate \
-        --num_images 50000
+        --output ./generated_images
     ```
 
-    The generated samples are saved into `./logs/GN-GAN-CR_CIFAR10_RES/generate`
-
-
-## Samples
-- GN-GAN-CR_CIFAR10_RES.txt
-
-    ![](./figures/cifar10_res_cr.png)
-- GN-cGAN_CIFAR10_BIGGAN.txt
-
-    ![](./figures/cifar10_biggan_10x10.png)
-- GN-GAN_CHURCH128_RES.txt
-
-    ![](./figures/lsun_church128_3x3.png)
-- GN-GAN_CELEBHQ128_RES.txt
-
-    ![](./figures/celebhq128_3x3.png)
+    The generated samples are saved into `./generated_images`

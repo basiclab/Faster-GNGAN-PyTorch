@@ -5,58 +5,17 @@ from contextlib import contextmanager
 import torch
 import numpy as np
 from torchvision.utils import save_image
-from tqdm import trange, tqdm
+from tqdm import tqdm
 
 
 device = torch.device('cuda:0')
-
-
-def generate_images(net_G, z_dim, n_classes=None, num_images=10000,
-                    batch_size=64, verbose=False):
-    all_images = None
-    with torch.no_grad():
-        for start in trange(0, num_images, batch_size, dynamic_ncols=True,
-                            leave=False, disable=(not verbose),
-                            desc="generate_images"):
-            batch_size = min(batch_size, num_images - start)
-            z = torch.randn(batch_size, z_dim).to(device)
-            # condition or unconditional
-            if n_classes is not None:
-                y = torch.randint(n_classes, size=(batch_size,)).to(device)
-                images = net_G(z, y).cpu().numpy()
-            else:
-                images = net_G(z).cpu().numpy()
-            if all_images is None:
-                _, C, H, W = images.shape
-                all_images = np.zeros((num_images, C, H, W))
-            # yield or append to list
-            all_images[start: start + len(images)] = images
-    all_images = (all_images + 1) / 2
-    return all_images
-
-
-def images_generator(net_G, z_dim, n_classes=None, num_images=50000,
-                     batch_size=64):
-    """Python generator for generating large number of images"""
-    with torch.no_grad():
-        for start in range(0, num_images, batch_size):
-            batch_size = min(batch_size, num_images - start)
-            z = torch.randn(batch_size, z_dim).to(device)
-            # condition or unconditional
-            if n_classes is not None:
-                y = torch.randint(n_classes, size=(batch_size,)).to(device)
-                images = net_G(z, y).cpu().numpy()
-            else:
-                images = net_G(z).cpu().numpy()
-            for image in images:
-                yield (image + 1) / 2
 
 
 def save_images(images, output_dir, verbose=False):
     os.makedirs(output_dir, exist_ok=True)
     for i, image in enumerate(tqdm(images, dynamic_ncols=True, leave=False,
                                    disable=(not verbose), desc="save_images")):
-        save_image(torch.tensor(image), os.path.join(output_dir, '%d.png' % i))
+        save_image(image, os.path.join(output_dir, '%d.png' % i))
 
 
 def infiniteloop(dataloader):
@@ -92,18 +51,3 @@ def module_no_grad(m: torch.nn.Module):
     yield m
     for name, param in m.named_parameters():
         param.requires_grad_(requires_grad_dict[name])
-
-
-def set_grad(m: torch.nn.Module, requires_grad: bool):
-    for name, param in m.named_parameters():
-        param.requires_grad_(requires_grad)
-
-
-def record_weight_norm(net_G, net_D, writer, step: int):
-    for name, p in net_G.named_parameters():
-        weight_norm = torch.sqrt((p * p).sum())
-        writer.add_scalar('weight_norm/net_G/%s' % name, weight_norm, step)
-
-    for name, p in net_D.named_parameters():
-        weight_norm = torch.sqrt((p * p).sum())
-        writer.add_scalar('weight_norm/net_D/%s' % name, weight_norm, step)

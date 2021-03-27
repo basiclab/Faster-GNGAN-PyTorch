@@ -2,23 +2,38 @@
 .vscode
 
 # python
+venv
 __pycache__
 .ipynb_checkpoints
 .python-version
 
 # log
 logs
+logs_large
+cvpr21
+iccv21
+*.zip
 
 # data
 data
 stats
-
-# readme figure
+*.png
+_cache_*
 figures
-!figures/cifar10_res_cr.png
-!figures/cifar10_biggan_10x10.png
-!figures/celebhq128_3x3.png
-!figures/lsun_church128_3x3.png
+# !figures/cifar10_res_cr.png
+# !figures/cifar10_biggan_10x10.png
+# !figures/celebhq128_3x3.png
+# !figures/lsun_church128_3x3.png
 
-# temporary scripts
+# pdf
+*.pdf
+
+# model
+*.pt
+
+# test scripts
 *.sh
+!create_supplemental_code.sh
+!unittest.sh
+selected_images.md
+rename_summary.py

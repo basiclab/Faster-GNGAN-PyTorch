@@ -3,15 +3,13 @@
 --arch=gn-cnn48
 --batch_size=64
 --cr=5
---dataset=stl10
---eval_in_eval_mode
+--dataset=stl10.48.raw
 --eval_use_torch
---fid_ref=./stats/stl10_unlabeled48.npz
+--fid_stats=./stats/stl10.unlabeled.48.npz
 --logdir=./logs/GN-GAN-CR_STL10_CNN_0
 --loss=bce
 --lr_decay_start=200000
 --n_dis=1
---nogenerate_use_ema
 --num_images=50000
 --sample_size=64
 --sample_step=500

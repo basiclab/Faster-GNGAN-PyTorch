@@ -5,8 +5,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+from .gn_gan import GradNorm
+
+
 sn = partial(torch.nn.utils.spectral_norm, eps=1e-6)
-# sn = lambda x: x
 
 
 class Attention(nn.Module):
@@ -54,14 +56,12 @@ class ConditionalBatchNorm2d(nn.Module):
         else:
             self.gain = nn.Embedding(cond_size, in_channel)
             self.bias = nn.Embedding(cond_size, in_channel)
-        self.register_buffer('stored_mean', torch.zeros(in_channel))
-        self.register_buffer('stored_var',  torch.ones(in_channel))
+        self.batchnorm2d = nn.BatchNorm2d(in_channel, affine=False)
 
     def forward(self, x, y):
         gain = self.gain(y).view(y.size(0), -1, 1, 1) + 1
         bias = self.bias(y).view(y.size(0), -1, 1, 1)
-        x = F.batch_norm(
-            x, self.stored_mean, self.stored_var, None, None, self.training)
+        x = self.batchnorm2d(x)
         return x * gain + bias
 
 
@@ -150,7 +150,7 @@ class Generator128(nn.Module):
             nn.ReLU(inplace=True),
             sn(nn.Conv2d(ch * 1, 3, 3, padding=1)),  # 3 x 128 x 128
             nn.Tanh())
-        res128_weights_init(self)
+        # res128_weights_init(self)
 
     def forward(self, z, y):
         y = self.shared_embedding(y)
@@ -209,7 +209,7 @@ class DisBlock(nn.Module):
         return self.residual(x) + self.shortcut(x)
 
 
-class Discriminator32(nn.Module):
+class Discriminator32(GradNorm):
     def __init__(self, ch=64, n_classes=10):
         super().__init__()
         self.fp16 = False
@@ -226,13 +226,13 @@ class Discriminator32(nn.Module):
         self.embedding = nn.Embedding(n_classes, ch * 4)
         res32_weights_init(self)
 
-    def forward(self, x, y):
+    def forward_impl(self, x, y):
         h = self.blocks(x).sum(dim=[2, 3])
         h = self.linear(h) + (self.embedding(y) * h).sum(dim=1, keepdim=True)
         return h
 
 
-class Discriminator128(nn.Module):
+class Discriminator128(GradNorm):
     def __init__(self, ch=96, n_classes=1000):
         super().__init__()
         # channels_multipler = [1, 2, 4, 8, 16, 16]
@@ -249,9 +249,9 @@ class Discriminator128(nn.Module):
 
         self.linear = nn.Linear(ch * 16, 1)
         self.embedding = nn.Embedding(n_classes, ch * 16)
-        res128_weights_init(self)
+        # res128_weights_init(self)
 
-    def forward(self, x, y):
+    def forward_impl(self, x, y):
         h = self.blocks(x).sum(dim=[2, 3])
         h = self.linear(h) + (self.embedding(y) * h).sum(dim=1, keepdim=True)
         return h
@@ -268,9 +268,10 @@ class GenDis(nn.Module):
         self.net_G = net_G
         self.net_D = net_D
 
-    def forward(self, z, y_fake, x_real=None, y_real=None):
+    def forward(self, z, y_fake, x_real=None, y_real=None, **kwargs):
         if x_real is not None and y_real is not None:
-            x_fake = self.net_G(z, y_fake).detach()
+            with torch.no_grad():
+                x_fake = self.net_G(z, y_fake).detach()
             x = torch.cat([x_real, x_fake], dim=0)
             y = torch.cat([y_real, y_fake], dim=0)
             pred = self.net_D(x, y=y)
@@ -279,6 +280,8 @@ class GenDis(nn.Module):
             return net_D_real, net_D_fake
         else:
             x_fake = self.net_G(z, y_fake)
+            for p in self.net_D.parameters():
+                assert(p.requires_grad is False)
             net_D_fake = self.net_D(x_fake, y=y_fake)
             return net_D_fake
 
