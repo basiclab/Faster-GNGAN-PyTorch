@@ -9,7 +9,6 @@ __pycache__
 
 # log
 logs
-logs_large
 cvpr21
 iccv21
 *.zip
@@ -20,10 +19,6 @@ stats
 *.png
 _cache_*
 figures
-# !figures/cifar10_res_cr.png
-# !figures/cifar10_biggan_10x10.png
-# !figures/celebhq128_3x3.png
-# !figures/lsun_church128_3x3.png
 
 # pdf
 *.pdf
@@ -33,7 +28,3 @@ figures
 
 # test scripts
 *.sh
-!create_supplemental_code.sh
-!unittest.sh
-selected_images.md
-rename_summary.py
