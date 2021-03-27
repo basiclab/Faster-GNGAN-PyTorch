@@ -14,7 +14,8 @@ from source.models import gn_gan, sn_gan, gp_gan
 from source.models.gn_gan import GenDis
 from source.losses import HingeLoss, BCEWithLogits, BCE, Wasserstein
 from source.datasets import get_dataset
-from source.utils import save_images, infiniteloop, set_seed, module_no_grad
+from source.utils import (
+    ema, save_images, infiniteloop, set_seed, module_no_grad)
 from metrics.score.both import get_inception_score_and_fid
 
 
@@ -70,6 +71,9 @@ flags.DEFINE_integer('z_dim', 128, "latent space dimension")
 flags.DEFINE_float('cr', 0, "weight for consistency regularization")
 flags.DEFINE_float('gp', 0, "weight for consistency regularization")
 flags.DEFINE_integer('seed', 0, "random seed")
+# ema
+flags.DEFINE_float('ema_decay', 0.9999, "ema decay rate")
+flags.DEFINE_integer('ema_start', 0, "start step for ema")
 # logging
 flags.DEFINE_bool('eval_use_torch', False, 'calculate IS and FID on gpu')
 flags.DEFINE_integer('eval_step', 5000, "evaluate FID and Inception Score")
@@ -103,7 +107,6 @@ def generate():
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
     ckpt = torch.load(os.path.join(FLAGS.logdir, 'best_model.pt'))
     net_G.load_state_dict(ckpt['net_G'])
-    net_G.eval()
 
     images = generate_images(net_G=net_G)
     if FLAGS.output is not None:
@@ -173,8 +176,12 @@ def train():
 
     # model
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
+    ema_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
     net_D = net_D_models[FLAGS.arch]().to(device)
     net_GD = GenDis(net_G, net_D)
+
+    # ema
+    ema(net_G, ema_G, decay=0)
 
     # loss
     loss_fn = loss_fns[FLAGS.loss]()
@@ -203,6 +210,7 @@ def train():
         ckpt = torch.load(os.path.join(FLAGS.logdir, 'model.pt'))
         net_G.load_state_dict(ckpt['net_G'])
         net_D.load_state_dict(ckpt['net_D'])
+        ema_G.load_state_dict(ckpt['ema_G'])
         optim_G.load_state_dict(ckpt['optim_G'])
         optim_D.load_state_dict(ckpt['optim_D'])
         sched_G.load_state_dict(ckpt['sched_G'])
@@ -285,6 +293,13 @@ def train():
                 loss.backward()
             optim_G.step()
 
+            # ema
+            if step < FLAGS.ema_start:
+                decay = 0
+            else:
+                decay = FLAGS.ema_decay
+            ema(net_G, ema_G, decay)
+
             # scheduler
             sched_G.step()
             sched_D.step()
@@ -292,25 +307,31 @@ def train():
             # sample from fixed z
             if step == 1 or step % FLAGS.sample_step == 0:
                 with torch.no_grad():
-                    fake = net_G(fixed_z).cpu()
-                    grid = (make_grid(fake) + 1) / 2
-                    writer.add_image('sample', grid, step)
-                    save_image(grid, os.path.join(
-                        FLAGS.logdir, 'sample', '%d.png' % step))
+                    fake_net = net_G(fixed_z).cpu()
+                    fake_ema = ema_G(fixed_z).cpu()
+                grid_net = (make_grid(fake_net) + 1) / 2
+                grid_ema = (make_grid(fake_ema) + 1) / 2
+                writer.add_image('sample_ema', grid_ema, step)
+                writer.add_image('sample', grid_net, step)
+                save_image(
+                    grid_ema,
+                    os.path.join(FLAGS.logdir, 'sample', '%d.png' % step))
 
             # evaluate IS, FID and save model
             if step == 1 or step % FLAGS.eval_step == 0:
-                (IS, IS_std), FID = evaluate(net_G)
-                if not math.isnan(FID) and not math.isnan(best_FID):
-                    save_as_best = (FID < best_FID)
+                (net_IS, net_IS_std), net_FID = evaluate(net_G)
+                (ema_IS, ema_IS_std), ema_FID = evaluate(ema_G)
+                if not math.isnan(net_FID) and not math.isnan(best_FID):
+                    save_as_best = (net_FID < best_FID)
                 else:
-                    save_as_best = (IS > best_IS)
+                    save_as_best = (net_IS > best_IS)
                 if save_as_best:
-                    best_IS = IS
-                    best_FID = FID
+                    best_IS = net_IS
+                    best_FID = net_FID
                 ckpt = {
                     'net_G': net_G.state_dict(),
                     'net_D': net_D.state_dict(),
+                    'ema_G': ema_G.state_dict(),
                     'optim_G': optim_G.state_dict(),
                     'optim_D': optim_D.state_dict(),
                     'sched_G': sched_G.state_dict(),
@@ -328,14 +349,18 @@ def train():
                         ckpt, os.path.join(FLAGS.logdir, 'best_model.pt'))
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
                 metrics = {
-                    'IS': IS,
-                    'IS_std': IS_std,
-                    'FID': FID,
+                    'IS': net_IS,
+                    'IS_std': net_IS_std,
+                    'FID': net_FID,
+                    'IS_EMA': ema_IS,
+                    'IS_std_EMA': ema_IS_std,
+                    'FID_EMA': ema_FID,
                 }
                 pbar.write(
                     "{}/{} ".format(step, FLAGS.total_steps) +
-                    "IS: {IS:6.3f}({IS_std:.3f}), FID: {FID:.3f}".format(
-                        **metrics))
+                    "IS: {IS:6.3f}({IS_std:.3f}), FID: {FID:.3f}, "
+                    "IS_EMA: {IS_EMA:6.3f}({IS_std_EMA:.3f}), "
+                    "FID_EMA: {FID_EMA:.3f}, ".format(**metrics))
                 for name, value in metrics.items():
                     writer.add_scalar(name, value, step)
                 writer.flush()
