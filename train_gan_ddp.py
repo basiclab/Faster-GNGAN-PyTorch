@@ -265,6 +265,10 @@ def train(rank, world_size):
     # ema
     ema(net_G, ema_G, decay=0)
 
+    D_batch_scale = 2
+    D_batch_size = local_batch_size * D_batch_scale
+    D_accumulation = FLAGS.accumulation // D_batch_scale
+
     disable_progress = (rank != 0)
     with trange(start, FLAGS.total_steps + 1,
                 initial=start - 1, total=FLAGS.total_steps,
@@ -275,17 +279,17 @@ def train(rank, world_size):
             loss_fake_sum = 0
 
             x = next(looper)[0]
-            x = iter(torch.split(x, local_batch_size))
+            x = iter(torch.split(x, D_batch_size))
             # Discriminator
             for _ in range(FLAGS.n_dis):
                 optim_D.zero_grad()
-                for _ in range(FLAGS.accumulation):
+                for _ in range(D_accumulation):
                     real = next(x).to(device)
                     z = torch.randn(
-                        local_batch_size, FLAGS.z_dim, device=device)
+                        D_batch_size, FLAGS.z_dim, device=device)
                     pred_real, pred_fake = net_GD(z, real)
                     loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
-                    loss = loss / FLAGS.accumulation
+                    loss = loss / D_accumulation
                     loss.backward()
 
                     loss_sum += loss.detach().item()
@@ -294,8 +298,8 @@ def train(rank, world_size):
                 optim_D.step()
 
             loss = loss_sum / FLAGS.n_dis
-            loss_real = loss_real_sum / FLAGS.n_dis / FLAGS.accumulation
-            loss_fake = loss_fake_sum / FLAGS.n_dis / FLAGS.accumulation
+            loss_real = loss_real_sum / FLAGS.n_dis / D_accumulation
+            loss_fake = loss_fake_sum / FLAGS.n_dis / D_accumulation
 
             if rank == 0:
                 writer.add_scalar('loss', loss, step)

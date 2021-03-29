@@ -58,9 +58,7 @@ def adam(params: List[Tensor],
             denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
 
         step_size = lr / bias_correction1
-
-        if beta1 != 0:
-            param.addcdiv_(exp_avg, denom, value=-step_size)
+        param.addcdiv_(exp_avg, denom, value=-step_size)
 
 
 class Adam(Optimizer):
