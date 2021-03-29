@@ -17,6 +17,7 @@ from source.models import gn_gan
 from source.losses import HingeLoss
 from source.datasets import get_dataset
 from source.utils import ema, module_no_grad, set_seed
+from source.optim import Adam
 from metrics.score.both import (
     get_inception_score_and_fid_from_directory,
     get_inception_score_and_fid)
@@ -195,8 +196,8 @@ def train(rank, world_size):
     loss_fn = HingeLoss()
 
     # optimizer
-    optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
-    optim_D = optim.Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
+    optim_G = Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
+    optim_D = Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
 
     # scheduler
     def decay_rate(step):
