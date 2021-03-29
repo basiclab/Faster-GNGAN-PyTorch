@@ -265,7 +265,7 @@ def train(rank, world_size):
     # ema
     ema(net_G, ema_G, decay=0)
 
-    D_batch_scale = 2
+    D_batch_scale = 1
     D_batch_size = local_batch_size * D_batch_scale
     D_accumulation = FLAGS.accumulation // D_batch_scale
 
