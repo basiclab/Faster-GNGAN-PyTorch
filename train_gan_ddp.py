@@ -100,7 +100,7 @@ def generate(rank, world_size):
     ckpt = torch.load(
         os.path.join(FLAGS.logdir, 'model.pt'), map_location='cpu')
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
-    net_G.load_state_dict(ckpt['ema_G'])
+    net_G.load_state_dict(ckpt['net_G'])
     net_G = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net_G)
     net_G = DistributedDataParallel(
         net_G, device_ids=[rank], output_device=rank)
@@ -265,10 +265,6 @@ def train(rank, world_size):
     # ema
     ema(net_G, ema_G, decay=0)
 
-    D_batch_scale = 1
-    D_batch_size = local_batch_size * D_batch_scale
-    D_accumulation = FLAGS.accumulation // D_batch_scale
-
     disable_progress = (rank != 0)
     with trange(start, FLAGS.total_steps + 1,
                 initial=start - 1, total=FLAGS.total_steps,
@@ -279,17 +275,17 @@ def train(rank, world_size):
             loss_fake_sum = 0
 
             x = next(looper)[0]
-            x = iter(torch.split(x, D_batch_size))
+            x = iter(torch.split(x, local_batch_size))
             # Discriminator
             for _ in range(FLAGS.n_dis):
                 optim_D.zero_grad()
-                for _ in range(D_accumulation):
+                for _ in range(FLAGS.accumulation):
                     real = next(x).to(device)
                     z = torch.randn(
-                        D_batch_size, FLAGS.z_dim, device=device)
+                        local_batch_size, FLAGS.z_dim, device=device)
                     pred_real, pred_fake = net_GD(z, real)
                     loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
-                    loss = loss / D_accumulation
+                    loss = loss / FLAGS.accumulation
                     loss.backward()
 
                     loss_sum += loss.detach().item()
@@ -298,8 +294,8 @@ def train(rank, world_size):
                 optim_D.step()
 
             loss = loss_sum / FLAGS.n_dis
-            loss_real = loss_real_sum / FLAGS.n_dis / D_accumulation
-            loss_fake = loss_fake_sum / FLAGS.n_dis / D_accumulation
+            loss_real = loss_real_sum / FLAGS.n_dis / FLAGS.accumulation
+            loss_fake = loss_fake_sum / FLAGS.n_dis / FLAGS.accumulation
 
             if rank == 0:
                 writer.add_scalar('loss', loss, step)
