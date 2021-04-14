@@ -124,8 +124,7 @@ def generate(rank, world_size):
             root = os.path.join(FLAGS.logdir, 'output')
         os.makedirs(root, exist_ok=True)
         pbar = tqdm(
-            total=FLAGS.num_images, dynamic_ncols=True, leave=False,
-            desc="save_images")
+            total=FLAGS.num_images, ncols=0, leave=False, desc="save_images")
         counter = 0
         for batch_images in generator:
             for image in batch_images:
@@ -277,7 +276,7 @@ def train(rank, world_size):
     disable_progress = (rank != 0)
     with trange(start, FLAGS.total_steps + 1,
                 initial=start - 1, total=FLAGS.total_steps,
-                disable=disable_progress, dynamic_ncols=True) as pbar:
+                disable=disable_progress, ncols=0) as pbar:
         for step in pbar:
             loss_sum = 0
             loss_real_sum = 0

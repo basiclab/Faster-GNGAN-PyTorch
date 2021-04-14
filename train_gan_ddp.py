@@ -127,8 +127,7 @@ def generate(rank, world_size):
             root = os.path.join(FLAGS.logdir, 'output')
         os.makedirs(root, exist_ok=True)
         pbar = tqdm(
-            total=FLAGS.num_images, dynamic_ncols=True, leave=False,
-            desc="save_images")
+            total=FLAGS.num_images, ncols=0, leave=False, desc="save_images")
         counter = 0
         for batch_images in generator:
             for image in batch_images:
@@ -187,9 +186,9 @@ def train(rank, world_size):
     looper = infiniteloop(dataloader, sampler)
 
     # model
-    net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
-    ema_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
-    net_D = net_D_models[FLAGS.arch]().to(device)
+    net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device, memory_format=torch.channels_last)
+    ema_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device, memory_format=torch.channels_last)
+    net_D = net_D_models[FLAGS.arch]().to(device, memory_format=torch.channels_last)
     net_GD = gn_gan.GenDis(net_G, net_D)
 
     # loss
@@ -268,7 +267,7 @@ def train(rank, world_size):
     disable_progress = (rank != 0)
     with trange(start, FLAGS.total_steps + 1,
                 initial=start - 1, total=FLAGS.total_steps,
-                disable=disable_progress, dynamic_ncols=True) as pbar:
+                disable=disable_progress, ncols=0) as pbar:
         for step in pbar:
             loss_sum = 0
             loss_real_sum = 0
@@ -280,7 +279,7 @@ def train(rank, world_size):
             for _ in range(FLAGS.n_dis):
                 optim_D.zero_grad()
                 for _ in range(FLAGS.accumulation):
-                    real = next(x).to(device)
+                    real = next(x).to(device, memory_format=torch.channels_last)
                     z = torch.randn(
                         local_batch_size, FLAGS.z_dim, device=device)
                     pred_real, pred_fake = net_GD(z, real)

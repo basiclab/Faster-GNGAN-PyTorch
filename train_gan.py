@@ -95,7 +95,7 @@ def generate_images(net_G):
     images = []
     with torch.no_grad():
         for _ in trange(0, FLAGS.num_images, FLAGS.batch_size,
-                        dynamic_ncols=True, leave=False):
+                        ncols=0, leave=False):
             z = torch.randn(FLAGS.batch_size * 2, FLAGS.z_dim).to(device)
             fake = (net_G(z) + 1) / 2
             images.append(fake.cpu())
@@ -233,7 +233,7 @@ def train():
         writer.add_image('real_sample', make_grid((real + 1) / 2))
         writer.flush()
 
-    with trange(start, FLAGS.total_steps + 1, dynamic_ncols=True,
+    with trange(start, FLAGS.total_steps + 1, ncols=0,
                 initial=start - 1, total=FLAGS.total_steps) as pbar:
         for step in pbar:
             loss_sum = 0
