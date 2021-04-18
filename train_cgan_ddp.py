@@ -161,12 +161,18 @@ def evaluate(net_G):
     return (IS, IS_std), FID
 
 
-def infiniteloop(dataloader, sampler):
-    epoch = 0
+def infiniteloop(dataloader, sampler, step=1):
+    epoch = step // len(dataloader)
+    start_idx = step % len(dataloader)
     while True:
         sampler.set_epoch(epoch)
-        for x, y in dataloader:
-            yield x, y
+        for idx, (x, y) in enumerate(dataloader):
+            if idx < start_idx:
+                continue
+            else:
+                yield x, y
+        start_idx = 0
+        epoch += 1
 
 
 def train(rank, world_size):
@@ -181,7 +187,6 @@ def train(rank, world_size):
         sampler=sampler,
         num_workers=FLAGS.num_workers,
         drop_last=True)
-    looper = infiniteloop(dataloader, sampler)
 
     # model
     net_G = net_G_models[FLAGS.arch](FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim)
@@ -273,10 +278,9 @@ def train(rank, world_size):
     # ema
     ema(net_G, ema_G, decay=0)
 
-    disable_progress = (rank != 0)
-    with trange(start, FLAGS.total_steps + 1,
-                initial=start - 1, total=FLAGS.total_steps,
-                disable=disable_progress, ncols=0) as pbar:
+    looper = infiniteloop(dataloader, sampler, step=start - 1)
+    with trange(start, FLAGS.total_steps + 1, disable=(rank != 0),
+                initial=start - 1, total=FLAGS.total_steps, ncols=0) as pbar:
         for step in pbar:
             loss_sum = 0
             loss_real_sum = 0

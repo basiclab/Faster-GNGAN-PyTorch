@@ -127,7 +127,7 @@ def generate(rank, world_size):
             root = os.path.join(FLAGS.logdir, 'output')
         os.makedirs(root, exist_ok=True)
         pbar = tqdm(
-            total=FLAGS.num_images, ncols=0, leave=False, desc="save_images")
+            total=FLAGS.num_images, ncols=0, desc="save_images")
         counter = 0
         for batch_images in generator:
             for image in batch_images:
@@ -163,12 +163,18 @@ def evaluate(net_G):
     return (IS, IS_std), FID
 
 
-def infiniteloop(dataloader, sampler):
-    epoch = 0
+def infiniteloop(dataloader, sampler, step=1):
+    epoch = step // len(dataloader)
+    start_idx = step % len(dataloader)
     while True:
         sampler.set_epoch(epoch)
-        for x, y in dataloader:
-            yield x, y
+        for idx, (x, y) in enumerate(dataloader):
+            if idx < start_idx:
+                continue
+            else:
+                yield x, y
+        start_idx = 0
+        epoch += 1
 
 
 def train(rank, world_size):
@@ -183,12 +189,11 @@ def train(rank, world_size):
         sampler=sampler,
         num_workers=FLAGS.num_workers,
         drop_last=True)
-    looper = infiniteloop(dataloader, sampler)
 
     # model
-    net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device, memory_format=torch.channels_last)
-    ema_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device, memory_format=torch.channels_last)
-    net_D = net_D_models[FLAGS.arch]().to(device, memory_format=torch.channels_last)
+    net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
+    ema_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
+    net_D = net_D_models[FLAGS.arch]().to(device)
     net_GD = gn_gan.GenDis(net_G, net_D)
 
     # loss
@@ -219,7 +224,7 @@ def train(rank, world_size):
 
     if FLAGS.resume:
         ckpt = torch.load(
-            os.path.join(FLAGS.logdir, 'model.pt'), map_location='cpu')
+            os.path.join(FLAGS.logdir, 'best_model.pt'), map_location='cpu')
         net_G.load_state_dict(ckpt['net_G'])
         net_D.load_state_dict(ckpt['net_D'])
         ema_G.load_state_dict(ckpt['ema_G'])
@@ -264,10 +269,9 @@ def train(rank, world_size):
     # ema
     ema(net_G, ema_G, decay=0)
 
-    disable_progress = (rank != 0)
-    with trange(start, FLAGS.total_steps + 1,
-                initial=start - 1, total=FLAGS.total_steps,
-                disable=disable_progress, ncols=0) as pbar:
+    looper = infiniteloop(dataloader, sampler, step=start - 1)
+    with trange(start, FLAGS.total_steps + 1, disable=(rank != 0),
+                initial=start - 1, total=FLAGS.total_steps, ncols=0) as pbar:
         for step in pbar:
             loss_sum = 0
             loss_real_sum = 0
@@ -279,7 +283,7 @@ def train(rank, world_size):
             for _ in range(FLAGS.n_dis):
                 optim_D.zero_grad()
                 for _ in range(FLAGS.accumulation):
-                    real = next(x).to(device, memory_format=torch.channels_last)
+                    real = next(x).to(device)
                     z = torch.randn(
                         local_batch_size, FLAGS.z_dim, device=device)
                     pred_real, pred_fake = net_GD(z, real)
