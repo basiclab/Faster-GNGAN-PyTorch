@@ -93,7 +93,8 @@ def get_dataset(name,
     name, img_size, hdf5 = name.split('.')
     img_size = int(img_size)
     assert name in [
-        'cifar10', 'stl10', 'imagenet', 'celebhq', 'lsun_church_outdoor']
+        'cifar10', 'stl10', 'imagenet', 'celebhq',
+        'lsun_church_outdoor', 'lsun_bedroom']
     assert hdf5 in ['raw', 'hdf5']
 
     if name in ['cifar10', 'stl10']:

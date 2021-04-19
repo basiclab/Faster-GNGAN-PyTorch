@@ -84,14 +84,14 @@ def image_generator(net_G):
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     local_batch_size = FLAGS.batch_size // world_size
-    local_num_images = FLAGS.num_images // world_size
     with torch.no_grad():
-        for _ in range(0, local_num_images, local_batch_size):
+        for idx in range(0, FLAGS.num_images, FLAGS.batch_size):
             z = torch.randn(local_batch_size, FLAGS.z_dim).to(rank)
             fake = (net_G(z) + 1) / 2
             fake_list = [torch.empty_like(fake) for _ in range(world_size)]
             dist.all_gather(fake_list, fake)
-            yield torch.cat(fake_list, dim=0).cpu()
+            fake = torch.cat(fake_list, dim=0).cpu()
+            yield fake[:FLAGS.num_images - idx]
     del fake, fake_list
 
 
@@ -132,10 +132,9 @@ def generate(rank, world_size):
         counter = 0
         for batch_images in generator:
             for image in batch_images:
-                if counter < FLAGS.num_images:
-                    save_image(image, os.path.join(root, '%d.png' % counter))
-                    counter += 1
-                    pbar.update()
+                save_image(image, os.path.join(root, '%d.png' % counter))
+                counter += 1
+                pbar.update()
         pbar.close()
         (IS, IS_std), FID = get_inception_score_and_fid_from_directory(
             root, FLAGS.fid_stats,
@@ -151,8 +150,11 @@ def evaluate(net_G):
         (IS, IS_std), FID = (None, None), None
     else:
         images = []
-        for batch_images in image_generator(net_G):
-            images.append(batch_images)
+        with tqdm(total=FLAGS.num_images, ncols=0,
+                  desc='Evaluating', leave=False) as pbar:
+            for batch_images in image_generator(net_G):
+                images.append(batch_images)
+                pbar.update(len(batch_images))
         images = torch.cat(images, dim=0)
         (IS, IS_std), FID = get_inception_score_and_fid(
             images,
@@ -271,7 +273,8 @@ def train(rank, world_size):
     ema(net_G, ema_G, decay=0)
 
     looper = infiniteloop(dataloader, sampler, step=start - 1)
-    with trange(start, FLAGS.total_steps + 1, disable=(rank != 0),
+    with trange(start, FLAGS.total_steps + 1,
+                desc='Training', disable=(rank != 0),
                 initial=start - 1, total=FLAGS.total_steps, ncols=0) as pbar:
         for step in pbar:
             loss_sum = 0
