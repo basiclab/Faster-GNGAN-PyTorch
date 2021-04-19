@@ -39,7 +39,8 @@ datasets = [
     'celebhq.128.hdf5',
     'celebhq.256.hdf5',
     'lsun_church_outdoor.128.hdf5',
-    'lsun_church_outdoor.256.hdf5'
+    'lsun_church_outdoor.256.hdf5',
+    'lsun_bedroom.256.raw',
 ]
 
 
@@ -355,18 +356,18 @@ def train(rank, world_size):
 
             # evaluate IS, FID and save model
             if step == 1 or step % FLAGS.eval_step == 0:
-                (net_IS, net_IS_std), net_FID = evaluate(net_G)
-                (ema_IS, ema_IS_std), ema_FID = evaluate(ema_G)
+                (IS, IS_std), FID = evaluate(net_G)
+                (IS_ema, IS_std_ema), FID_ema = evaluate(ema_G)
 
                 if rank != 0:
                     continue
 
-                if not math.isnan(ema_FID) and not math.isnan(best_FID):
-                    save_as_best = (ema_FID < best_FID)
+                if not math.isnan(FID_ema) and not math.isnan(best_FID):
+                    save_as_best = (FID_ema < best_FID)
                 else:
-                    save_as_best = (ema_IS > best_IS)
+                    save_as_best = (IS_ema > best_IS)
                 if save_as_best:
-                    best_IS = ema_IS
+                    best_IS = IS_ema
                     best_FID = best_FID
                 ckpt = {
                     'net_G': net_G.state_dict(),
@@ -389,24 +390,26 @@ def train(rank, world_size):
                         ckpt, os.path.join(FLAGS.logdir, 'best_model.pt'))
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
                 metrics = {
-                    'IS': net_IS,
-                    'IS_std': net_IS_std,
-                    'FID': net_FID,
-                    'IS_EMA': ema_IS,
-                    'IS_std_EMA': ema_IS_std,
-                    'FID_EMA': ema_FID,
+                    'IS': IS,
+                    'IS_std': IS_std,
+                    'FID': FID,
+                    'IS_EMA': IS_ema,
+                    'IS_std_EMA': IS_std_ema,
+                    'FID_EMA': FID_ema,
                 }
-                pbar.write(
-                    "{}/{} ".format(step, FLAGS.total_steps) +
-                    "IS: {IS:6.3f}({IS_std:.3f}), FID: {FID:.3f}, "
-                    "IS_EMA: {IS_EMA:6.3f}({IS_std_EMA:.3f}), "
-                    "FID_EMA: {FID_EMA:.3f}, ".format(**metrics))
+                k = len(str(FLAGS.total_steps))
                 for name, value in metrics.items():
                     writer.add_scalar(name, value, step)
                 writer.flush()
                 with open(os.path.join(FLAGS.logdir, 'eval.txt'), 'a') as f:
                     metrics['step'] = step
                     f.write(json.dumps(metrics) + "\n")
+                pbar.write(
+                    f"{step:{k}d}/{FLAGS.total_steps} "
+                    f"IS: {IS:6.3f}({IS_std:.3f}), "
+                    f"FID: {FID:.3f}, "
+                    f"IS_EMA: {IS_ema:6.3f}({IS_std_ema:.3f}), "
+                    f"FID_EMA: {FID_ema:.3f}")
     if rank == 0:
         writer.close()
 

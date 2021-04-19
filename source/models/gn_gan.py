@@ -1,6 +1,22 @@
+from functools import partial
+
 import torch
 import torch.nn as nn
 import torch.nn.init as init
+
+
+def apply_grad_norm_hook(x, f):
+    def hook(grad, f):
+        with torch.no_grad():
+            grad_norm = torch.norm(
+                torch.flatten(grad, start_dim=1), p=2, dim=1) * grad.shape[0]
+            f = f[:, 0]
+            scale = grad_norm / ((grad_norm + torch.abs(f)) ** 2)
+            scale = scale.view(-1, 1, 1, 1)
+        grad = grad * scale
+        return grad
+    x.register_hook(partial(hook, f=f))
+    return x
 
 
 def grad_norm(net_D, *args, **kwargs):
@@ -521,5 +537,7 @@ class GenDis(nn.Module):
             else:
                 return net_D_real, net_D_fake
         else:
-            net_D_fake = self.net_D(self.net_G(z))
-            return net_D_fake
+            x = self.net_G(z)
+            y = self.net_D.forward_impl(x)
+            apply_grad_norm_hook(x, y)
+            return y

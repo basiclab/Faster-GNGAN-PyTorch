@@ -132,6 +132,10 @@ def get_dataset(name,
             return torchvision.datasets.LSUN(
                 './data/lsun/',
                 classes=['church_outdoor_train'], transform=transform)
+        if name == 'lsun_bedroom':
+            return torchvision.datasets.LSUN(
+                './data/lsun/',
+                classes=['bedroom_train'], transform=transform)
     else:
         transform = transforms.Compose([
             transforms.ToPILImage(),
