@@ -258,11 +258,6 @@ class Discriminator128(GradNorm):
 
 
 class GenDis(nn.Module):
-    """
-    As suggest in official PyTorch implementation, paralleling generator and
-    discriminator together can avoid gathering fake images in the
-    intermediate stage
-    """
     def __init__(self, net_G, net_D):
         super().__init__()
         self.net_G = net_G
@@ -279,10 +274,7 @@ class GenDis(nn.Module):
                 pred, [x_real.shape[0], x_fake.shape[0]])
             return net_D_real, net_D_fake
         else:
-            x_fake = self.net_G(z, y_fake)
-            for p in self.net_D.parameters():
-                assert(p.requires_grad is False)
-            net_D_fake = self.net_D(x_fake, y=y_fake)
+            net_D_fake = self.net_D(self.net_G(z, y_fake), y=y_fake)
             return net_D_fake
 
 

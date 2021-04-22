@@ -242,9 +242,9 @@ class ResGenerator32(nn.Module):
                 init.zeros_(m.bias)
 
     def forward(self, z):
-        inputs = self.linear(z)
-        inputs = inputs.view(-1, 256, 4, 4)
-        return self.output(self.blocks(inputs))
+        z = self.linear(z)
+        z = z.view(-1, 256, 4, 4)
+        return self.output(self.blocks(z))
 
 
 class ResGenerator48(nn.Module):
@@ -274,9 +274,9 @@ class ResGenerator48(nn.Module):
                 init.zeros_(m.bias)
 
     def forward(self, z):
-        inputs = self.linear(z)
-        inputs = inputs.view(-1, 512, 6, 6)
-        return self.output(self.blocks(inputs))
+        z = self.linear(z)
+        z = z.view(-1, 512, 6, 6)
+        return self.output(self.blocks(z))
 
 
 class ResGenerator128(nn.Module):
@@ -516,9 +516,6 @@ class ResDiscriminator256(GradNorm):
 
 
 class GenDis(nn.Module):
-    """
-    Speed up training by paralleling generator and discriminator together
-    """
     def __init__(self, net_G, net_D):
         super().__init__()
         self.net_G = net_G
@@ -530,14 +527,14 @@ class GenDis(nn.Module):
                 fake = self.net_G(z).detach()
             x = torch.cat([real, fake], dim=0)
             pred = self.net_D(x)
-            net_D_real, net_D_fake = torch.split(
+            pred_real, pred_fake = torch.split(
                 pred, [real.shape[0], fake.shape[0]])
             if return_fake:
-                return net_D_real, net_D_fake, fake
+                return pred_real, pred_fake, fake
             else:
-                return net_D_real, net_D_fake
+                return pred_real, pred_fake
         else:
-            x = self.net_G(z)
-            y = self.net_D.forward_impl(x)
-            apply_grad_norm_hook(x, y)
-            return y
+            fake = self.net_G(z)
+            pred_fake = self.net_D.forward_impl(fake)
+            apply_grad_norm_hook(fake, pred_fake)
+            return pred_fake

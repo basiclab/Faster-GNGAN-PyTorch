@@ -116,6 +116,29 @@ class Discriminator9(DiscriminatorK):
         super().__init__(num_per_block=3)
 
 
+class GenDis(nn.Module):
+    def __init__(self, net_G, net_D):
+        super().__init__()
+        self.net_G = net_G
+        self.net_D = net_D
+
+    def forward(self, z, real=None, return_fake=False):
+        if real is not None:
+            with torch.no_grad():
+                fake = self.net_G(z).detach()
+            x = torch.cat([real, fake], dim=0)
+            pred = self.net_D(x)
+            pred_real, pred_fake = torch.split(
+                pred, [real.shape[0], fake.shape[0]])
+            if return_fake:
+                return pred_real, pred_fake, fake
+            else:
+                return pred_real, pred_fake
+        else:
+            pred_fake = self.net_D(self.net_G(z))
+            return pred_fake
+
+
 if __name__ == '__main__':
     import copy
     import torch.nn as nn

@@ -400,13 +400,13 @@ def train(rank, world_size):
                     'IS_std_EMA': IS_std_ema,
                     'FID_EMA': FID_ema,
                 }
-                k = len(str(FLAGS.total_steps))
                 for name, value in metrics.items():
                     writer.add_scalar(name, value, step)
                 writer.flush()
                 with open(os.path.join(FLAGS.logdir, 'eval.txt'), 'a') as f:
                     metrics['step'] = step
                     f.write(json.dumps(metrics) + "\n")
+                k = len(str(FLAGS.total_steps))
                 pbar.write(
                     f"{step:{k}d}/{FLAGS.total_steps} "
                     f"IS: {IS:6.3f}({IS_std:.3f}), "

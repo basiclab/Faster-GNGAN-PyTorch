@@ -165,9 +165,9 @@ class ResGenerator32(nn.Module):
                 init.zeros_(m.bias)
 
     def forward(self, z):
-        inputs = self.linear(z)
-        inputs = inputs.view(-1, 256, 4, 4)
-        return self.output(self.blocks(inputs))
+        z = self.linear(z)
+        z = z.view(-1, 256, 4, 4)
+        return self.output(self.blocks(z))
 
 
 class OptimizedDisblock(nn.Module):
@@ -257,3 +257,26 @@ class ResDiscriminator32(nn.Module):
         x = self.model(x).sum(dim=[2, 3])
         x = self.linear(x)
         return x
+
+
+class GenDis(nn.Module):
+    def __init__(self, net_G, net_D):
+        super().__init__()
+        self.net_G = net_G
+        self.net_D = net_D
+
+    def forward(self, z, real=None, return_fake=False):
+        if real is not None:
+            with torch.no_grad():
+                fake = self.net_G(z).detach()
+            x = torch.cat([real, fake], dim=0)
+            pred = self.net_D(x)
+            pred_real, pred_fake = torch.split(
+                pred, [real.shape[0], fake.shape[0]])
+            if return_fake:
+                return pred_real, pred_fake, fake
+            else:
+                return pred_real, pred_fake
+        else:
+            pred_fake = self.net_D(self.net_G(z))
+            return pred_fake

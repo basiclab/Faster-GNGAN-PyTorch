@@ -52,10 +52,3 @@ class BCE(nn.BCELoss):
             loss = super().forward(
                 (pred_real + 1) / 2, torch.ones_like(pred_real))
             return loss
-
-
-
-loss_fns = {
-    'bce': BCEWithLogits,
-    'hinge': HingeLoss,
-}
