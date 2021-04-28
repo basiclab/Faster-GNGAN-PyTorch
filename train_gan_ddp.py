@@ -166,7 +166,7 @@ def evaluate(net_G):
     return (IS, IS_std), FID
 
 
-def infiniteloop(dataloader, sampler, step=1):
+def infiniteloop(dataloader, sampler, step=0):
     epoch = step // len(dataloader)
     start_idx = step % len(dataloader)
     while True:
@@ -183,12 +183,13 @@ def infiniteloop(dataloader, sampler, step=1):
 def train(rank, world_size):
     device = torch.device('cuda:%d' % rank)
 
+    local_batch_size = FLAGS.batch_size // world_size
     dataset = get_dataset(FLAGS.dataset)
     sampler = torch.utils.data.DistributedSampler(
-        dataset, seed=FLAGS.seed, drop_last=True)
+        dataset, shuffle=True, seed=FLAGS.seed, drop_last=True)
     dataloader = torch.utils.data.DataLoader(
         dataset=dataset,
-        batch_size=FLAGS.batch_size * FLAGS.n_dis * FLAGS.accumulation,
+        batch_size=local_batch_size * FLAGS.accumulation * FLAGS.n_dis,
         sampler=sampler,
         num_workers=FLAGS.num_workers,
         drop_last=True)
@@ -213,8 +214,6 @@ def train(rank, world_size):
     sched_G = optim.lr_scheduler.LambdaLR(optim_G, lr_lambda=decay_rate)
     sched_D = optim.lr_scheduler.LambdaLR(optim_D, lr_lambda=decay_rate)
 
-    local_batch_size = FLAGS.batch_size // world_size
-
     if rank == 0:
         writer = SummaryWriter(FLAGS.logdir)
         D_size = 0
@@ -227,7 +226,7 @@ def train(rank, world_size):
 
     if FLAGS.resume:
         ckpt = torch.load(
-            os.path.join(FLAGS.logdir, 'best_model.pt'), map_location='cpu')
+            os.path.join(FLAGS.logdir, 'model.pt'), map_location='cpu')
         net_G.load_state_dict(ckpt['net_G'])
         net_D.load_state_dict(ckpt['net_D'])
         ema_G.load_state_dict(ckpt['ema_G'])
@@ -371,7 +370,7 @@ def train(rank, world_size):
                     save_as_best = (IS_ema > best_IS)
                 if save_as_best:
                     best_IS = IS_ema
-                    best_FID = best_FID
+                    best_FID = FID_ema
                 ckpt = {
                     'net_G': net_G.state_dict(),
                     'net_D': net_D.state_dict(),
