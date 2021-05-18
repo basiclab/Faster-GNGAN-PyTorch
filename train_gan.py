@@ -10,8 +10,7 @@ from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
-from source.models import gn_gan, sn_gan, gp_gan
-from source.models.gn_gan import GenDis
+from source.models import gn_gan
 from source.losses import HingeLoss, BCEWithLogits, BCE, Wasserstein
 from source.datasets import get_dataset
 from source.utils import (
@@ -24,10 +23,6 @@ net_G_models = {
     'gn-cnn48': gn_gan.Generator48,
     'gn-res32': gn_gan.ResGenerator32,
     'gn-res48': gn_gan.ResGenerator48,
-    'sn-cnn32': sn_gan.Generator32,
-    'sn-res32': sn_gan.ResGenerator32,
-    'gp-cnn32': gp_gan.Generator32,
-    'gp-res32': gp_gan.ResGenerator32,
 }
 
 net_D_models = {
@@ -35,21 +30,6 @@ net_D_models = {
     'gn-cnn48': gn_gan.Discriminator48,
     'gn-res32': gn_gan.ResDiscriminator32,
     'gn-res48': gn_gan.ResDiscriminator48,
-    'sn-cnn32': sn_gan.Discriminator32,
-    'sn-res32': sn_gan.ResDiscriminator32,
-    'gp-cnn32': gp_gan.Discriminator32,
-    'gp-res32': gp_gan.ResDiscriminator32,
-}
-
-net_GD_models = {
-    'gn-cnn32': gn_gan.GenDis,
-    'gn-cnn48': gn_gan.GenDis,
-    'gn-res32': gn_gan.GenDis,
-    'gn-res48': gn_gan.GenDis,
-    'sn-cnn32': sn_gan.GenDis,
-    'sn-res32': sn_gan.GenDis,
-    'gp-cnn32': gp_gan.GenDis,
-    'gp-res32': gp_gan.GenDis,
 }
 
 loss_fns = {
@@ -131,28 +111,25 @@ def generate():
 
 
 def evaluate(net_G):
-    net_G.eval()
     images = generate_images(net_G=net_G)
-    net_G.train()
     (IS, IS_std), FID = get_inception_score_and_fid(
         images, FLAGS.fid_stats, use_torch=FLAGS.eval_use_torch, verbose=True)
     del images
     return (IS, IS_std), FID
 
 
-def consistency_loss(net_D, real, pred_real):
-    consistency_transforms = transforms.Compose([
-        transforms.Lambda(lambda x: (x + 1) / 2),
-        transforms.ToPILImage(mode='RGB'),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomAffine(0, translate=(0.2, 0.2)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-    ])
-
+def consistency_loss(net_D, real, pred_real,
+                     transform=transforms.Compose([
+                        transforms.Lambda(lambda x: (x + 1) / 2),
+                        transforms.ToPILImage(mode='RGB'),
+                        transforms.RandomHorizontalFlip(),
+                        transforms.RandomAffine(0, translate=(0.2, 0.2)),
+                        transforms.ToTensor(),
+                        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+                     ])):
     aug_real = real.detach().clone().cpu()
     for idx, img in enumerate(aug_real):
-        aug_real[idx] = consistency_transforms(img)
+        aug_real[idx] = transform(img)
     aug_real = aug_real.to(device)
     loss = ((net_D(aug_real) - pred_real) ** 2).mean()
     return loss
@@ -189,7 +166,7 @@ def train():
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
     ema_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
     net_D = net_D_models[FLAGS.arch]().to(device)
-    net_GD = net_GD_models[FLAGS.arch](net_G, net_D)
+    net_GD = gn_gan.GenDis(net_G, net_D)
 
     # ema
     ema(net_G, ema_G, decay=0)

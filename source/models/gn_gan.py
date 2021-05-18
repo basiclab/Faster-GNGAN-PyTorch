@@ -526,7 +526,7 @@ class GenDis(nn.Module):
             with torch.no_grad():
                 fake = self.net_G(z).detach()
             x = torch.cat([real, fake], dim=0)
-            pred = self.net_D(x)
+            pred = self.net_D.forward_impl(x)
             pred_real, pred_fake = torch.split(
                 pred, [real.shape[0], fake.shape[0]])
             if return_fake:

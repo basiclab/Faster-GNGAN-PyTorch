@@ -17,6 +17,7 @@ from source.models import gn_biggan
 from source.losses import HingeLoss
 from source.datasets import get_dataset
 from source.utils import ema, module_no_grad, set_seed
+from source.optim import Adam
 from metrics.score.both import (
     get_inception_score_and_fid_from_directory,
     get_inception_score_and_fid)
@@ -52,7 +53,6 @@ flags.DEFINE_integer('num_workers', 8, "dataloader workers")
 flags.DEFINE_integer('accumulation', 1, 'gradient accumulation steps')
 flags.DEFINE_float('G_lr', 1e-4, "Generator learning rate")
 flags.DEFINE_float('D_lr', 4e-4, "Discriminator learning rate")
-flags.DEFINE_float('eps', 1e-6, "for Adam")
 flags.DEFINE_multi_float('betas', [0.0, 0.999], "for Adam")
 flags.DEFINE_integer('n_dis', 4, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
@@ -81,16 +81,15 @@ def image_generator(net_G):
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     local_batch_size = FLAGS.batch_size // world_size
-    local_num_images = FLAGS.num_images // world_size
     with torch.no_grad():
-        for _ in range(0, local_num_images, local_batch_size):
+        for idx in range(0, FLAGS.num_images, FLAGS.batch_size):
             z = torch.randn(local_batch_size, FLAGS.z_dim).to(rank)
             y = torch.randint(FLAGS.n_classes, (local_batch_size,)).to(rank)
             fake = (net_G(z, y) + 1) / 2
             fake_list = [torch.empty_like(fake) for _ in range(world_size)]
             dist.all_gather(fake_list, fake)
-            if rank == 0:
-                yield torch.cat(fake_list, dim=0).cpu()
+            fake = torch.cat(fake_list, dim=0).cpu()
+            yield fake[:FLAGS.num_images - idx]
     del fake, fake_list
 
 
@@ -109,7 +108,9 @@ def generate(rank, world_size):
     with torch.no_grad():
         fixed_z = torch.cat(ckpt['fixed_z'], dim=0).to(device)
         fixed_z = torch.split(fixed_z, len(fixed_z) // world_size, dim=0)
-        fake = (net_G(fixed_z[rank]) + 1) / 2
+        fixed_y = torch.cat(ckpt['fixed_y'], dim=0).to(device)
+        fixed_y = torch.split(fixed_y, len(fixed_y) // world_size, dim=0)
+        fake = (net_G(fixed_z[rank], fixed_y[rank]) + 1) / 2
         fake_list = [torch.empty_like(fake) for _ in range(world_size)]
         dist.all_gather(fake_list, fake)
         if rank == 0:
@@ -117,21 +118,23 @@ def generate(rank, world_size):
 
     # generate images for calculating IS and FID
     generator = image_generator(net_G)
-    if rank == 0:
+    if rank != 0:
+        for batch_images in generator:
+            pass
+    else:
         if FLAGS.output is not None:
             root = FLAGS.output
         else:
             root = os.path.join(FLAGS.logdir, 'output')
         os.makedirs(root, exist_ok=True)
         pbar = tqdm(
-            total=FLAGS.num_images, ncols=0, leave=False, desc="save_images")
+            total=FLAGS.num_images, ncols=0, desc="save_images")
         counter = 0
         for batch_images in generator:
             for image in batch_images:
-                if counter < FLAGS.num_images:
-                    save_image(image, os.path.join(root, '%d.png' % counter))
-                    counter += 1
-                    pbar.update()
+                save_image(image, os.path.join(root, '%d.png' % counter))
+                counter += 1
+                pbar.update()
         pbar.close()
         (IS, IS_std), FID = get_inception_score_and_fid_from_directory(
             root, FLAGS.fid_stats,
@@ -142,26 +145,28 @@ def generate(rank, world_size):
 
 def evaluate(net_G):
     if dist.get_rank() != 0:
-        image_generator(net_G)
+        for batch_images in image_generator(net_G):
+            pass
         (IS, IS_std), FID = (None, None), None
     else:
         images = []
-        for batch_images in image_generator(net_G):
-            images.append(batch_images)
+        with tqdm(total=FLAGS.num_images, ncols=0,
+                  desc='Evaluating', leave=False) as pbar:
+            for batch_images in image_generator(net_G):
+                images.append(batch_images)
+                pbar.update(len(batch_images))
         images = torch.cat(images, dim=0)
         (IS, IS_std), FID = get_inception_score_and_fid(
             images,
             fid_stats_path=FLAGS.fid_stats,
-            num_images=len(images),
             use_torch=FLAGS.eval_use_torch,
-            parallel=FLAGS.parallel,
             verbose=True)
         del images
     dist.barrier()
     return (IS, IS_std), FID
 
 
-def infiniteloop(dataloader, sampler, step=1):
+def infiniteloop(dataloader, sampler, step=0):
     epoch = step // len(dataloader)
     start_idx = step % len(dataloader)
     while True:
@@ -178,12 +183,13 @@ def infiniteloop(dataloader, sampler, step=1):
 def train(rank, world_size):
     device = torch.device('cuda:%d' % rank)
 
+    local_batch_size = FLAGS.batch_size // world_size
     dataset = get_dataset(FLAGS.dataset)
     sampler = torch.utils.data.DistributedSampler(
-        dataset, seed=FLAGS.seed, drop_last=True)
+        dataset, shuffle=True, seed=FLAGS.seed, drop_last=True)
     dataloader = torch.utils.data.DataLoader(
         dataset=dataset,
-        batch_size=FLAGS.batch_size * FLAGS.n_dis * FLAGS.accumulation,
+        batch_size=local_batch_size * FLAGS.accumulation * FLAGS.n_dis,
         sampler=sampler,
         num_workers=FLAGS.num_workers,
         drop_last=True)
@@ -194,20 +200,21 @@ def train(rank, world_size):
     ema_G = net_G_models[FLAGS.arch](FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim)
     ema_G = ema_G.to(device)
     net_D = net_D_models[FLAGS.arch](FLAGS.ch, FLAGS.n_classes).to(device)
-    net_GD = net_GD_models[FLAGS.arch](net_G, net_D)
+    net_GD = gn_biggan.GenDis(net_G, net_D)
 
     if rank == 0:
+        # Orthogonal initialization is time consuming.
+        # Only initialize node 0 to speed up the process
         gn_biggan.res128_weights_init(net_G)
         gn_biggan.res128_weights_init(net_D)
-
     dist.barrier()
 
     # loss
     loss_fn = HingeLoss()
 
     # optimizer
-    optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
-    optim_D = optim.Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
+    optim_G = Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
+    optim_D = Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
 
     # scheduler
     def decay_rate(step):
@@ -215,8 +222,6 @@ def train(rank, world_size):
         return 1 - max(step - FLAGS.lr_decay_start, 0) / period
     sched_G = optim.lr_scheduler.LambdaLR(optim_G, lr_lambda=decay_rate)
     sched_D = optim.lr_scheduler.LambdaLR(optim_D, lr_lambda=decay_rate)
-
-    local_batch_size = FLAGS.batch_size // world_size
 
     if rank == 0:
         writer = SummaryWriter(FLAGS.logdir)
@@ -233,13 +238,13 @@ def train(rank, world_size):
             os.path.join(FLAGS.logdir, 'model.pt'), map_location='cpu')
         net_G.load_state_dict(ckpt['net_G'])
         net_D.load_state_dict(ckpt['net_D'])
+        ema_G.load_state_dict(ckpt['ema_G'])
         optim_G.load_state_dict(ckpt['optim_G'])
         optim_D.load_state_dict(ckpt['optim_D'])
         sched_G.load_state_dict(ckpt['sched_G'])
         sched_D.load_state_dict(ckpt['sched_D'])
-        ema_G.load_state_dict(ckpt['ema_G'])
-        fixed_z = ckpt['fixed_z'].to(device)
-        fixed_y = ckpt['fixed_y'].to(device)
+        fixed_z = torch.cat(ckpt['fixed_z'], dim=0).to(device)
+        fixed_z = torch.split(fixed_z, FLAGS.sample_size // world_size, dim=0)
         # start value
         start = ckpt['step'] + 1
         best_IS, best_FID = ckpt['best_IS'], ckpt['best_FID']
@@ -279,7 +284,8 @@ def train(rank, world_size):
     ema(net_G, ema_G, decay=0)
 
     looper = infiniteloop(dataloader, sampler, step=start - 1)
-    with trange(start, FLAGS.total_steps + 1, disable=(rank != 0),
+    with trange(start, FLAGS.total_steps + 1,
+                desc='Training', disable=(rank != 0),
                 initial=start - 1, total=FLAGS.total_steps, ncols=0) as pbar:
         for step in pbar:
             loss_sum = 0
@@ -290,15 +296,15 @@ def train(rank, world_size):
             x = iter(torch.split(x, local_batch_size))
             y = iter(torch.split(y, local_batch_size))
             # Discriminator
-            for n in range(FLAGS.n_dis):
+            for _ in range(FLAGS.n_dis):
                 optim_D.zero_grad()
                 for _ in range(FLAGS.accumulation):
                     x_real, y_real = next(x).to(device), next(y).to(device)
-                    z_ = torch.randn(
+                    z = torch.randn(
                         local_batch_size, FLAGS.z_dim, device=device)
-                    y_ = torch.randint(
+                    y = torch.randint(
                         FLAGS.n_classes, (local_batch_size,), device=device)
-                    pred_real, pred_fake = net_GD(z_, y_, x_real, y_real)
+                    pred_real, pred_fake = net_GD(z, y, x_real, y_real)
                     loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
                     loss = loss / FLAGS.accumulation
                     loss.backward()
@@ -346,32 +352,40 @@ def train(rank, world_size):
 
             if step == 1 or step % FLAGS.sample_step == 0:
                 with torch.no_grad():
-                    fake = (ema_G(fixed_z[rank], fixed_y[rank]) + 1) / 2
-                fake_list = [torch.empty_like(fake) for _ in range(world_size)]
-                dist.all_gather(fake_list, fake)
+                    fake_ema = (ema_G(fixed_z[rank], fixed_y[rank]) + 1) / 2
+                    fake_net = (net_G(fixed_z[rank], fixed_y[rank]) + 1) / 2
+                fake_ema_list = [
+                    torch.empty_like(fake_ema) for _ in range(world_size)]
+                fake_net_list = [
+                    torch.empty_like(fake_net) for _ in range(world_size)]
+                dist.all_gather(fake_ema_list, fake_ema)
+                dist.all_gather(fake_net_list, fake_net)
                 if rank == 0:
-                    fake = torch.cat(fake_list, dim=0).cpu()
-                    grid = make_grid(fake)
-                    writer.add_image('sample', grid, step)
+                    fake_ema = torch.cat(fake_ema_list, dim=0).cpu()
+                    fake_net = torch.cat(fake_net_list, dim=0).cpu()
+                    grid_ema = make_grid(fake_ema)
+                    grid_net = make_grid(fake_ema)
+                    writer.add_image('sample_ema', grid_ema, step)
+                    writer.add_image('sample', grid_net, step)
                     save_image(
-                        grid,
+                        grid_ema,
                         os.path.join(FLAGS.logdir, 'sample', '%d.png' % step))
-                del fake, fake_list
+                del fake_ema, fake_net, fake_ema_list, fake_net_list
 
             if step == 1 or step % FLAGS.eval_step == 0:
-                (net_IS, net_IS_std), net_FID = evaluate(net_G)
-                (ema_IS, ema_IS_std), ema_FID = evaluate(ema_G)
+                (IS, IS_std), FID = evaluate(net_G)
+                (IS_ema, IS_std_ema), FID_ema = evaluate(ema_G)
 
                 if rank != 0:
                     continue
 
-                if not math.isnan(ema_FID) and not math.isnan(best_FID):
-                    save_as_best = (ema_FID < best_FID)
+                if not math.isnan(FID_ema) and not math.isnan(best_FID):
+                    save_as_best = (FID_ema < best_FID)
                 else:
-                    save_as_best = (ema_IS > best_IS)
+                    save_as_best = (IS_ema > best_IS)
                 if save_as_best:
-                    best_IS = ema_IS
-                    best_FID = best_FID
+                    best_IS = IS_ema
+                    best_FID = FID_ema
                 ckpt = {
                     'net_G': net_G.state_dict(),
                     'net_D': net_D.state_dict(),
@@ -394,25 +408,28 @@ def train(rank, world_size):
                         ckpt, os.path.join(FLAGS.logdir, 'best_model.pt'))
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
                 metrics = {
-                    'IS': net_IS,
-                    'IS_std': net_IS_std,
-                    'FID': net_FID,
-                    'IS_EMA': ema_IS,
-                    'IS_std_EMA': ema_IS_std,
-                    'FID_EMA': ema_FID,
+                    'IS': IS,
+                    'IS_std': IS_std,
+                    'FID': FID,
+                    'IS_EMA': IS_ema,
+                    'IS_std_EMA': IS_std_ema,
+                    'FID_EMA': FID_ema,
                 }
-                pbar.write(
-                    "{}/{} ".format(step, FLAGS.total_steps) +
-                    "IS: {IS:6.3f}({IS_std:.3f}), FID: {FID:.3f}, "
-                    "IS_EMA: {IS_EMA:6.3f}({IS_std_EMA:.3f}), "
-                    "FID_EMA: {FID_EMA:.3f}, ".format(**metrics))
                 for name, value in metrics.items():
                     writer.add_scalar(name, value, step)
                 writer.flush()
                 with open(os.path.join(FLAGS.logdir, 'eval.txt'), 'a') as f:
                     metrics['step'] = step
                     f.write(json.dumps(metrics) + "\n")
-    writer.close()
+                k = len(str(FLAGS.total_steps))
+                pbar.write(
+                    f"{step:{k}d}/{FLAGS.total_steps} "
+                    f"IS: {IS:6.3f}({IS_std:.3f}), "
+                    f"FID: {FID:.3f}, "
+                    f"IS_EMA: {IS_ema:6.3f}({IS_std_ema:.3f}), "
+                    f"FID_EMA: {FID_ema:.3f}")
+    if rank == 0:
+        writer.close()
 
 
 def initialize_process(rank, world_size):

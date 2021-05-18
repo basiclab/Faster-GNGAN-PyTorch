@@ -14,7 +14,7 @@ from source.models import gn_biggan
 from source.losses import HingeLoss
 from source.datasets import get_dataset
 from source.utils import (
-    ema, save_images, module_no_grad, infiniteloop, set_seed)
+    ema, save_images, infiniteloop, set_seed, module_no_grad)
 from metrics.score.both import get_inception_score_and_fid
 
 
@@ -107,19 +107,19 @@ def evaluate(net_G):
     return (IS, IS_std), FID
 
 
-def consistency_loss(net_D, x_real, y_real, pred_real):
-    consistency_transforms = transforms.Compose([
-        transforms.Lambda(lambda x: (x + 1) / 2),
-        transforms.ToPILImage(mode='RGB'),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomAffine(0, translate=(0.2, 0.2)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-    ])
+def consistency_loss(net_D, x_real, y_real, pred_real,
+                     transform=transforms.Compose([
+                        transforms.Lambda(lambda x: (x + 1) / 2),
+                        transforms.ToPILImage(mode='RGB'),
+                        transforms.RandomHorizontalFlip(),
+                        transforms.RandomAffine(0, translate=(0.2, 0.2)),
+                        transforms.ToTensor(),
+                        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+                     ])):
 
     aug_real = x_real.detach().clone().cpu()
     for idx, img in enumerate(aug_real):
-        aug_real[idx] = consistency_transforms(img)
+        aug_real[idx] = transform(img)
     aug_real = aug_real.to(device)
     loss = ((net_D(aug_real, y=y_real) - pred_real) ** 2).mean()
     return loss
@@ -283,15 +283,15 @@ def train():
 
             # evaluate IS, FID and save model
             if step == 1 or step % FLAGS.eval_step == 0:
-                (net_IS, net_IS_std), net_FID = evaluate(net_G)
-                (ema_IS, ema_IS_std), ema_FID = evaluate(ema_G)
-                if not math.isnan(ema_FID) and not math.isnan(best_FID):
-                    save_as_best = (ema_FID < best_FID)
+                (IS, IS_std), FID = evaluate(net_G)
+                (IS_ema, IS_std_ema), FID_ema = evaluate(ema_G)
+                if not math.isnan(FID_ema) and not math.isnan(best_FID):
+                    save_as_best = (FID_ema < best_FID)
                 else:
-                    save_as_best = (ema_IS > best_IS)
+                    save_as_best = (IS_ema > best_IS)
                 if save_as_best:
-                    best_IS = ema_IS
-                    best_FID = best_FID
+                    best_IS = IS_ema
+                    best_FID = FID_ema
                 ckpt = {
                     'net_G': net_G.state_dict(),
                     'net_D': net_D.state_dict(),
@@ -314,24 +314,26 @@ def train():
                         ckpt, os.path.join(FLAGS.logdir, 'best_model.pt'))
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
                 metrics = {
-                    'IS': net_IS,
-                    'IS_std': net_IS_std,
-                    'FID': net_FID,
-                    'IS_EMA': ema_IS,
-                    'IS_std_EMA': ema_IS_std,
-                    'FID_EMA': ema_FID,
+                    'IS': IS,
+                    'IS_std': IS_std,
+                    'FID': FID,
+                    'IS_EMA': IS_ema,
+                    'IS_std_EMA': IS_std_ema,
+                    'FID_EMA': FID_ema,
                 }
-                pbar.write(
-                    "{}/{} ".format(step, FLAGS.total_steps) +
-                    "IS: {IS:6.3f}({IS_std:.3f}), FID: {FID:.3f}, "
-                    "IS_EMA: {IS_EMA:6.3f}({IS_std_EMA:.3f}), "
-                    "FID_EMA: {FID_EMA:.3f}, ".format(**metrics))
                 for name, value in metrics.items():
                     writer.add_scalar(name, value, step)
                 writer.flush()
                 with open(os.path.join(FLAGS.logdir, 'eval.txt'), 'a') as f:
                     metrics['step'] = step
                     f.write(json.dumps(metrics) + "\n")
+                k = len(str(FLAGS.total_steps))
+                pbar.write(
+                    f"{step:{k}d}/{FLAGS.total_steps} "
+                    f"IS: {IS:6.3f}({IS_std:.3f}), "
+                    f"FID: {FID:.3f}, "
+                    f"IS_EMA: {IS_ema:6.3f}({IS_std_ema:.3f}), "
+                    f"FID_EMA: {FID_ema:.3f}")
     writer.close()
 
 
