@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-from .gn_gan import GradNorm
+from .gn_gan import apply_grad_norm_hook, grad_norm
 
 
 sn = partial(torch.nn.utils.spectral_norm, eps=1e-6)
@@ -209,7 +209,7 @@ class DisBlock(nn.Module):
         return self.residual(x) + self.shortcut(x)
 
 
-class Discriminator32(GradNorm):
+class Discriminator32(nn.Module):
     def __init__(self, ch=64, n_classes=10):
         super().__init__()
         self.fp16 = False
@@ -232,7 +232,7 @@ class Discriminator32(GradNorm):
         return h
 
 
-class Discriminator128(GradNorm):
+class Discriminator128(nn.Module):
     def __init__(self, ch=96, n_classes=1000):
         super().__init__()
         # channels_multipler = [1, 2, 4, 8, 16, 16]
@@ -263,19 +263,24 @@ class GenDis(nn.Module):
         self.net_G = net_G
         self.net_D = net_D
 
-    def forward(self, z, y_fake, x_real=None, y_real=None, **kwargs):
+    def forward(self, z, y_fake, x_real=None, y_real=None, return_fake=False):
         if x_real is not None and y_real is not None:
             with torch.no_grad():
                 x_fake = self.net_G(z, y_fake).detach()
             x = torch.cat([x_real, x_fake], dim=0)
             y = torch.cat([y_real, y_fake], dim=0)
-            pred = self.net_D(x, y=y)
-            net_D_real, net_D_fake = torch.split(
+            pred = grad_norm(self.net_D, x, y=y)
+            pred_real, pred_fake = torch.split(
                 pred, [x_real.shape[0], x_fake.shape[0]])
-            return net_D_real, net_D_fake
+            if return_fake:
+                return pred_real, pred_fake, x_fake
+            else:
+                return pred_real, pred_fake
         else:
-            net_D_fake = self.net_D(self.net_G(z, y_fake), y=y_fake)
-            return net_D_fake
+            fake = self.net_G(z, y_fake)
+            pred_fake = self.net_D(fake, y=y_fake)
+            apply_grad_norm_hook(fake, pred_fake)
+            return pred_fake
 
 
 def res32_weights_init(m):

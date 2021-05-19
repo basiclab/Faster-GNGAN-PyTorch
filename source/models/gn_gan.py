@@ -36,11 +36,6 @@ def grad_norm(net_D, *args, **kwargs):
     return fx
 
 
-class GradNorm(nn.Module):
-    def forward(self, *args, **kwargs):
-        return grad_norm(self.forward_impl, *args, **kwargs)
-
-
 class Generator(nn.Module):
     def __init__(self, z_dim, M=4):
         super().__init__()
@@ -75,7 +70,7 @@ class Generator(nn.Module):
         return x
 
 
-class Discriminator(GradNorm):
+class Discriminator(nn.Module):
     def __init__(self, M=32):
         super().__init__()
         self.M = M
@@ -109,7 +104,7 @@ class Discriminator(GradNorm):
                 init.normal_(m.weight, std=0.02)
                 init.zeros_(m.bias)
 
-    def forward_impl(self, x):
+    def forward(self, x):
         x = self.main(x)
         x = torch.flatten(x, start_dim=1)
         x = self.linear(x)
@@ -136,7 +131,7 @@ class Discriminator48(Discriminator):
         super().__init__(M=48)
 
 
-class DiscriminatorK(GradNorm):
+class DiscriminatorK(nn.Module):
     def __init__(self, num_per_block=1, M=32):
         super().__init__()
         blocks = []
@@ -162,7 +157,7 @@ class DiscriminatorK(GradNorm):
                 init.normal_(m.weight, std=0.02)
                 init.zeros_(m.bias)
 
-    def forward_impl(self, x):
+    def forward(self, x):
         x = self.main(x)
         x = torch.flatten(x, start_dim=1)
         x = self.linear(x)
@@ -410,7 +405,7 @@ class DisBlock(nn.Module):
         return (self.residual(x) + self.shortcut(x))
 
 
-class ResDiscriminator32(GradNorm):
+class ResDiscriminator32(nn.Module):
     def __init__(self):
         super().__init__()
         self.model = nn.Sequential(
@@ -428,14 +423,14 @@ class ResDiscriminator32(GradNorm):
         init.kaiming_normal_(self.linear.weight)
         init.zeros_(self.linear.bias)
 
-    def forward_impl(self, x):
+    def forward(self, x):
         x = self.model(x)
         x = torch.flatten(x, start_dim=1)
         x = self.linear(x)
         return x
 
 
-class ResDiscriminator48(GradNorm):
+class ResDiscriminator48(nn.Module):
     def __init__(self):
         super().__init__()
         self.model = nn.Sequential(
@@ -453,14 +448,14 @@ class ResDiscriminator48(GradNorm):
         init.kaiming_normal_(self.linear.weight)
         init.zeros_(self.linear.bias)
 
-    def forward_impl(self, x):
+    def forward(self, x):
         x = self.model(x)
         x = torch.flatten(x, start_dim=1)
         x = self.linear(x)
         return x
 
 
-class ResDiscriminator128(GradNorm):
+class ResDiscriminator128(nn.Module):
     def __init__(self):
         super().__init__()
         self.model = nn.Sequential(
@@ -480,14 +475,14 @@ class ResDiscriminator128(GradNorm):
         init.kaiming_normal_(self.linear.weight)
         init.zeros_(self.linear.bias)
 
-    def forward_impl(self, x):
+    def forward(self, x):
         x = self.model(x)
         x = torch.flatten(x, start_dim=1)
         x = self.linear(x)
         return x
 
 
-class ResDiscriminator256(GradNorm):
+class ResDiscriminator256(nn.Module):
     def __init__(self):
         super().__init__()
         self.model = nn.Sequential(
@@ -508,7 +503,7 @@ class ResDiscriminator256(GradNorm):
         init.kaiming_normal_(self.linear.weight)
         init.zeros_(self.linear.bias)
 
-    def forward_impl(self, x):
+    def forward(self, x):
         x = self.model(x)
         x = torch.flatten(x, start_dim=1)
         x = self.linear(x)
@@ -526,7 +521,8 @@ class GenDis(nn.Module):
             with torch.no_grad():
                 fake = self.net_G(z).detach()
             x = torch.cat([real, fake], dim=0)
-            pred = self.net_D.forward_impl(x)
+            pred = grad_norm(self.net_D, x)
+            # pred = self.net_D(x)
             pred_real, pred_fake = torch.split(
                 pred, [real.shape[0], fake.shape[0]])
             if return_fake:
@@ -535,6 +531,6 @@ class GenDis(nn.Module):
                 return pred_real, pred_fake
         else:
             fake = self.net_G(z)
-            pred_fake = self.net_D.forward_impl(fake)
+            pred_fake = self.net_D(fake)
             apply_grad_norm_hook(fake, pred_fake)
             return pred_fake

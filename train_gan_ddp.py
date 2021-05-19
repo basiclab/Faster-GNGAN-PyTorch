@@ -2,11 +2,12 @@ import os
 import json
 import math
 import datetime
+from shutil import copyfile
 
 import torch
 import torch.optim as optim
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.multiprocessing import Process
 from absl import flags, app
 from torchvision.utils import make_grid, save_image
@@ -85,8 +86,8 @@ def image_generator(net_G):
     world_size = dist.get_world_size()
     local_batch_size = FLAGS.batch_size // world_size
     with torch.no_grad():
-        for idx in range(0, FLAGS.num_images, FLAGS.batch_size):
-            z = torch.randn(local_batch_size, FLAGS.z_dim).to(rank)
+        for idx in range(0, FLAGS.num_images, FLAGS.batch_size * 2):
+            z = torch.randn(local_batch_size * 2, FLAGS.z_dim).to(rank)
             fake = (net_G(z) + 1) / 2
             fake_list = [torch.empty_like(fake) for _ in range(world_size)]
             dist.all_gather(fake_list, fake)
@@ -99,12 +100,11 @@ def generate(rank, world_size):
     device = torch.device('cuda:%d' % rank)
 
     ckpt = torch.load(
-        os.path.join(FLAGS.logdir, 'model.pt'), map_location='cpu')
+        os.path.join(FLAGS.logdir, 'best_model.pt'), map_location='cpu')
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
-    net_G.load_state_dict(ckpt['net_G'])
     net_G = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net_G)
-    net_G = DistributedDataParallel(
-        net_G, device_ids=[rank], output_device=rank)
+    net_G = DDP(net_G, device_ids=[rank], output_device=rank)
+    net_G.load_state_dict(ckpt['ema_G'])
 
     # generate fixed sample
     with torch.no_grad():
@@ -127,15 +127,13 @@ def generate(rank, world_size):
         else:
             root = os.path.join(FLAGS.logdir, 'output')
         os.makedirs(root, exist_ok=True)
-        pbar = tqdm(
-            total=FLAGS.num_images, ncols=0, desc="save_images")
-        counter = 0
-        for batch_images in generator:
-            for image in batch_images:
-                save_image(image, os.path.join(root, '%d.png' % counter))
-                counter += 1
-                pbar.update()
-        pbar.close()
+        with tqdm(total=FLAGS.num_images, ncols=0, desc="save_images") as pbar:
+            counter = 0
+            for batch_images in generator:
+                for image in batch_images:
+                    save_image(image, os.path.join(root, '%d.png' % counter))
+                    counter += 1
+                    pbar.update()
         (IS, IS_std), FID = get_inception_score_and_fid_from_directory(
             root, FLAGS.fid_stats,
             use_torch=FLAGS.eval_use_torch, verbose=True)
@@ -196,8 +194,13 @@ def train(rank, world_size):
 
     # model
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
+    net_G = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net_G)
+    net_G = DDP(net_G, device_ids=[rank], output_device=rank)
     ema_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
+    ema_G = torch.nn.SyncBatchNorm.convert_sync_batchnorm(ema_G)
+    ema_G = DDP(ema_G, device_ids=[rank], output_device=rank)
     net_D = net_D_models[FLAGS.arch]().to(device)
+    net_D = DDP(net_D, device_ids=[rank], output_device=rank)
     net_GD = gn_gan.GenDis(net_G, net_D)
 
     # loss
@@ -262,11 +265,6 @@ def train(rank, world_size):
                     break
             writer.add_image('real_sample', make_grid((real_sample + 1) / 2))
             writer.flush()
-
-    net_GD = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net_GD)
-    net_GD = DistributedDataParallel(
-        net_GD,
-        device_ids=[rank], output_device=rank, find_unused_parameters=True)
 
     # ema
     ema(net_G, ema_G, decay=0)
@@ -356,68 +354,69 @@ def train(rank, world_size):
                         os.path.join(FLAGS.logdir, 'sample', '%d.png' % step))
                 del fake_ema, fake_net, fake_ema_list, fake_net_list
 
-            # evaluate IS, FID and save model
+            # evaluate IS, FID and save latest model
             if step == 1 or step % FLAGS.eval_step == 0:
+                if rank == 0:
+                    ckpt = {
+                        'net_G': net_G.state_dict(),
+                        'net_D': net_D.state_dict(),
+                        'ema_G': ema_G.state_dict(),
+                        'optim_G': optim_G.state_dict(),
+                        'optim_D': optim_D.state_dict(),
+                        'sched_G': sched_G.state_dict(),
+                        'sched_D': sched_D.state_dict(),
+                        'fixed_z': fixed_z,
+                        'best_IS': best_IS,
+                        'best_FID': best_FID,
+                        'step': step,
+                    }
+                    torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
+                    if step == 1 or step % FLAGS.save_step == 0:
+                        torch.save(
+                            ckpt, os.path.join(FLAGS.logdir, '%06d.pt' % step))
+
                 (IS, IS_std), FID = evaluate(net_G)
                 (IS_ema, IS_std_ema), FID_ema = evaluate(ema_G)
 
-                if rank != 0:
-                    continue
-
-                if not math.isnan(FID_ema) and not math.isnan(best_FID):
-                    save_as_best = (FID_ema < best_FID)
-                else:
-                    save_as_best = (IS_ema > best_IS)
-                if save_as_best:
-                    best_IS = IS_ema
-                    best_FID = FID_ema
-                ckpt = {
-                    'net_G': net_G.state_dict(),
-                    'net_D': net_D.state_dict(),
-                    'ema_G': ema_G.state_dict(),
-                    'optim_G': optim_G.state_dict(),
-                    'optim_D': optim_D.state_dict(),
-                    'sched_G': sched_G.state_dict(),
-                    'sched_D': sched_D.state_dict(),
-                    'fixed_z': fixed_z,
-                    'best_IS': best_IS,
-                    'best_FID': best_FID,
-                    'step': step,
-                }
-                if step == 1 or step % FLAGS.save_step == 0:
-                    torch.save(
-                        ckpt, os.path.join(FLAGS.logdir, '%06d.pt' % step))
-                if save_as_best:
-                    torch.save(
-                        ckpt, os.path.join(FLAGS.logdir, 'best_model.pt'))
-                torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
-                metrics = {
-                    'IS': IS,
-                    'IS_std': IS_std,
-                    'FID': FID,
-                    'IS_EMA': IS_ema,
-                    'IS_std_EMA': IS_std_ema,
-                    'FID_EMA': FID_ema,
-                }
-                for name, value in metrics.items():
-                    writer.add_scalar(name, value, step)
-                writer.flush()
-                with open(os.path.join(FLAGS.logdir, 'eval.txt'), 'a') as f:
-                    metrics['step'] = step
-                    f.write(json.dumps(metrics) + "\n")
-                k = len(str(FLAGS.total_steps))
-                pbar.write(
-                    f"{step:{k}d}/{FLAGS.total_steps} "
-                    f"IS: {IS:6.3f}({IS_std:.3f}), "
-                    f"FID: {FID:.3f}, "
-                    f"IS_EMA: {IS_ema:6.3f}({IS_std_ema:.3f}), "
-                    f"FID_EMA: {FID_ema:.3f}")
+                if rank == 0:
+                    if not math.isnan(FID_ema) and not math.isnan(best_FID):
+                        save_as_best = (FID_ema < best_FID)
+                    else:
+                        save_as_best = (IS_ema > best_IS)
+                    if save_as_best:
+                        best_IS = IS_ema
+                        best_FID = FID_ema
+                        copyfile(
+                            os.path.join(FLAGS.logdir, 'model.pt'),
+                            os.path.join(FLAGS.logdir, 'best_model.pt'))
+                    metrics = {
+                        'IS': IS,
+                        'IS_std': IS_std,
+                        'FID': FID,
+                        'IS_EMA': IS_ema,
+                        'IS_std_EMA': IS_std_ema,
+                        'FID_EMA': FID_ema,
+                    }
+                    for name, value in metrics.items():
+                        writer.add_scalar(name, value, step)
+                    writer.flush()
+                    path = os.path.join(FLAGS.logdir, 'eval.txt')
+                    with open(path, 'a') as f:
+                        metrics['step'] = step
+                        f.write(json.dumps(metrics) + "\n")
+                    k = len(str(FLAGS.total_steps))
+                    pbar.write(
+                        f"{step:{k}d}/{FLAGS.total_steps} "
+                        f"IS: {IS:6.3f}({IS_std:.3f}), "
+                        f"FID: {FID:.3f}, "
+                        f"IS_EMA: {IS_ema:6.3f}({IS_std_ema:.3f}), "
+                        f"FID_EMA: {FID_ema:.3f}")
     if rank == 0:
         writer.close()
 
 
 def initialize_process(rank, world_size):
-    set_seed(FLAGS.seed)
+    set_seed(FLAGS.seed + rank)
 
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = FLAGS.port
