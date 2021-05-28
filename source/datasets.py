@@ -165,6 +165,14 @@ if __name__ == "__main__":
     print('label', label.shape, label.dtype)
     # torchvision.utils.save_image((image + 1) / 2, 'lsun_church_outdoor.png')
 
+    dataset = get_dataset(
+        'lsun_bedroom.256.hdf5', aug_transform=transforms.Compose([]))
+    print(len(dataset))
+    image, label = dataset[0]
+    print('image', image.shape, image.dtype, image.min(), image.max())
+    print('label', label.shape, label.dtype)
+    torchvision.utils.save_image((image + 1) / 2, 'lsun_bedroom.png')
+
     # dataset = get_dataset(
     #     'imagenet.128.hdf5', aug_transform=transforms.Compose([]))
     # print(len(dataset))

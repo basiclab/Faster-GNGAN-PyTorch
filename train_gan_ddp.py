@@ -17,11 +17,9 @@ from tqdm import trange, tqdm
 from source.models import gn_gan
 from source.losses import HingeLoss
 from source.datasets import get_dataset
-from source.utils import ema, module_no_grad, set_seed
+from source.utils import ema, save_images, module_no_grad, set_seed
 from source.optim import Adam
-from metrics.score.both import (
-    get_inception_score_and_fid_from_directory,
-    get_inception_score_and_fid)
+from metrics.score.both import get_inception_score_and_fid
 
 
 net_G_models = {
@@ -75,8 +73,8 @@ flags.DEFINE_integer('sample_size', 64, "sampling size of images")
 flags.DEFINE_string('logdir', './logs/GN-GAN_CELEBHQ256_RES_0', 'log folder')
 flags.DEFINE_string('fid_stats', './stats/celebhq.val.256.npz', 'FID cache')
 # generate
-flags.DEFINE_bool('generate', False, 'generate images from pretrained model')
-flags.DEFINE_string('output', None, 'path to output directory')
+flags.DEFINE_bool('eval', False, 'load model and evaluate sample images')
+flags.DEFINE_string('save', "", 'load model and save sample images to dir')
 # distributed
 flags.DEFINE_string('port', '55556', 'distributed port')
 
@@ -96,7 +94,7 @@ def image_generator(net_G):
     del fake, fake_list
 
 
-def generate(rank, world_size):
+def eval_save(rank, world_size):
     device = torch.device('cuda:%d' % rank)
 
     ckpt = torch.load(
@@ -117,27 +115,24 @@ def generate(rank, world_size):
             save_image(torch.cat(fake_list, dim=0), 'fixed_sample.png')
 
     # generate images for calculating IS and FID
-    generator = image_generator(net_G)
     if rank != 0:
-        for batch_images in generator:
+        for batch_images in image_generator(net_G):
             pass
     else:
-        if FLAGS.output is not None:
-            root = FLAGS.output
-        else:
-            root = os.path.join(FLAGS.logdir, 'output')
-        os.makedirs(root, exist_ok=True)
-        with tqdm(total=FLAGS.num_images, ncols=0, desc="save_images") as pbar:
-            counter = 0
-            for batch_images in generator:
-                for image in batch_images:
-                    save_image(image, os.path.join(root, '%d.png' % counter))
-                    counter += 1
-                    pbar.update()
-        (IS, IS_std), FID = get_inception_score_and_fid_from_directory(
-            root, FLAGS.fid_stats,
-            use_torch=FLAGS.eval_use_torch, verbose=True)
-        print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
+        images = []
+        with tqdm(total=FLAGS.num_images, ncols=0,
+                  desc='Sample images') as pbar:
+            for batch_images in image_generator(net_G):
+                images.append(batch_images)
+                pbar.update(len(batch_images))
+        images = torch.cat(images, dim=0)
+        if FLAGS.eval:
+            (IS, IS_std), FID = get_inception_score_and_fid(
+                images, FLAGS.fid_stats, use_torch=FLAGS.eval_use_torch,
+                verbose=True)
+            print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
+        if FLAGS.save is not None:
+            save_images(images, FLAGS.save, verbose=True)
     del ckpt, net_G
 
 
@@ -425,8 +420,8 @@ def initialize_process(rank, world_size):
                             world_size=world_size, rank=rank)
     print("Node %d is initialized" % rank)
 
-    if FLAGS.generate:
-        generate(rank, world_size)
+    if FLAGS.eval or FLAGS.save:
+        eval_save(rank, world_size)
     else:
         train(rank, world_size)
 

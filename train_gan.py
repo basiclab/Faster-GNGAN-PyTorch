@@ -75,8 +75,8 @@ flags.DEFINE_integer('sample_size', 64, "sampling size of images")
 flags.DEFINE_string('logdir', './logs/GN-GAN_CIFAR10_RES_0', 'log folder')
 flags.DEFINE_string('fid_stats', './stats/cifar10.train.npz', 'FID cache')
 # generate
-flags.DEFINE_bool('generate', False, 'generate images from pretrained model')
-flags.DEFINE_string('output', None, 'path to output directory')
+flags.DEFINE_bool('eval', False, 'load model and evaluate sample images')
+flags.DEFINE_string('save', "", 'load model and save sample images to dir')
 
 
 device = torch.device('cuda:0')
@@ -94,20 +94,19 @@ def generate_images(net_G):
     return images[:FLAGS.num_images]
 
 
-def generate():
+def eval_save():
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
     ckpt = torch.load(os.path.join(FLAGS.logdir, 'best_model.pt'))
     net_G.load_state_dict(ckpt['net_G'])
 
     images = generate_images(net_G=net_G)
-    if FLAGS.output is not None:
-        save_path = FLAGS.output
-    else:
-        save_path = os.path.join(FLAGS.logdir, 'output')
-    save_images(images, save_path, verbose=True)
-    (IS, IS_std), FID = get_inception_score_and_fid(
-        images, FLAGS.fid_stats, use_torch=FLAGS.eval_use_torch, verbose=True)
-    print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
+    if FLAGS.eval:
+        (IS, IS_std), FID = get_inception_score_and_fid(
+            images, FLAGS.fid_stats, use_torch=FLAGS.eval_use_torch,
+            verbose=True)
+        print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
+    if FLAGS.save is not None:
+        save_images(images, FLAGS.save, verbose=True)
 
 
 def evaluate(net_G):
@@ -362,8 +361,8 @@ def train():
 
 def main(argv):
     set_seed(FLAGS.seed)
-    if FLAGS.generate:
-        generate()
+    if FLAGS.eval or FLAGS.save:
+        eval_save()
     else:
         train()
 
