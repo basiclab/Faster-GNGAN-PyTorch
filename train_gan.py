@@ -75,8 +75,12 @@ flags.DEFINE_integer('sample_size', 64, "sampling size of images")
 flags.DEFINE_string('logdir', './logs/GN-GAN_CIFAR10_RES_0', 'log folder')
 flags.DEFINE_string('fid_stats', './stats/cifar10.train.npz', 'FID cache')
 # generate
-flags.DEFINE_bool('generate', False, 'generate images from pretrained model')
-flags.DEFINE_string('output', None, 'path to output directory')
+flags.DEFINE_bool('eval', False, 'load model and evaluate sample images')
+flags.DEFINE_string('save', "", 'load model and save sample images to dir')
+# debug
+flags.DEFINE_bool('record_grad_norm', False, 'record grad norm')
+flags.DEFINE_bool('record_D_weight_norm', False, 'record D weight norm')
+flags.DEFINE_float('alpha', 0.5, 'alpha')
 
 
 device = torch.device('cuda:0')
@@ -94,20 +98,19 @@ def generate_images(net_G):
     return images[:FLAGS.num_images]
 
 
-def generate():
+def eval_save():
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
     ckpt = torch.load(os.path.join(FLAGS.logdir, 'best_model.pt'))
     net_G.load_state_dict(ckpt['net_G'])
 
     images = generate_images(net_G=net_G)
-    if FLAGS.output is not None:
-        save_path = FLAGS.output
-    else:
-        save_path = os.path.join(FLAGS.logdir, 'output')
-    save_images(images, save_path, verbose=True)
-    (IS, IS_std), FID = get_inception_score_and_fid(
-        images, FLAGS.fid_stats, use_torch=FLAGS.eval_use_torch, verbose=True)
-    print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
+    if FLAGS.eval:
+        (IS, IS_std), FID = get_inception_score_and_fid(
+            images, FLAGS.fid_stats, use_torch=FLAGS.eval_use_torch,
+            verbose=True)
+        print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
+    if FLAGS.save is not None:
+        save_images(images, FLAGS.save, verbose=True)
 
 
 def evaluate(net_G):
@@ -166,7 +169,7 @@ def train():
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
     ema_G = net_G_models[FLAGS.arch](FLAGS.z_dim).to(device)
     net_D = net_D_models[FLAGS.arch]().to(device)
-    net_GD = gn_gan.GenDis(net_G, net_D)
+    net_GD = gn_gan.GenDis(net_G, net_D, alpha=FLAGS.alpha)
 
     # ema
     ema(net_G, ema_G, decay=0)
@@ -257,6 +260,12 @@ def train():
                 loss_cr_sum += loss_cr.cpu().item()
                 loss_gp_sum += loss_gp.cpu().item()
 
+            if FLAGS.record_D_weight_norm:
+                with torch.no_grad():
+                    for name, param in net_D.named_parameters():
+                        writer.add_scalar(
+                            f'weight/norm/{name}', torch.norm(param), step)
+
             loss = loss_sum / FLAGS.n_dis
             loss_real = loss_real_sum / FLAGS.n_dis
             loss_fake = loss_fake_sum / FLAGS.n_dis
@@ -274,12 +283,23 @@ def train():
                 loss_fake='%.3f' % loss_fake)
 
             # Generator
-            optim_G.zero_grad()
             with module_no_grad(net_D):
+                optim_G.zero_grad()
                 z = torch.randn(FLAGS.batch_size * 2, FLAGS.z_dim).to(device)
-                loss = loss_fn(net_GD(z))
+                if FLAGS.record_grad_norm:
+                    pred_fake, fake = net_GD(z, return_fake=True)
+                    fake.retain_grad()
+                else:
+                    pred_fake = net_GD(z)
+                loss = loss_fn(pred_fake)
                 loss.backward()
-            optim_G.step()
+                optim_G.step()
+
+            if FLAGS.record_grad_norm:
+                avg_grad_norm = torch.norm(torch.flatten(
+                    (fake.grad * fake.shape[0]),
+                    start_dim=1), p=2, dim=1).mean()
+                writer.add_scalar('avg_grad_norm', avg_grad_norm, step)
 
             # ema
             if step < FLAGS.ema_start:
@@ -362,8 +382,8 @@ def train():
 
 def main(argv):
     set_seed(FLAGS.seed)
-    if FLAGS.generate:
-        generate()
+    if FLAGS.eval or FLAGS.save:
+        eval_save()
     else:
         train()
 

@@ -61,6 +61,7 @@ flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
+flags.DEFINE_float('alpha', 0.5, 'alpha')
 flags.DEFINE_integer('seed', 0, "random seed")
 # ema
 flags.DEFINE_float('ema_decay', 0.9999, "ema decay rate")
@@ -201,7 +202,7 @@ def train(rank, world_size):
     ema_G = DDP(ema_G, device_ids=[rank], output_device=rank)
     net_D = net_D_models[FLAGS.arch]().to(device)
     net_D = DDP(net_D, device_ids=[rank], output_device=rank)
-    net_GD = gn_gan.GenDis(net_G, net_D)
+    net_GD = gn_gan.GenDis(net_G, net_D, alpha=FLAGS.alpha)
 
     # loss
     loss_fn = HingeLoss()
