@@ -23,21 +23,15 @@ from metrics.score.both import get_inception_score_and_fid
 
 
 net_G_models = {
-    'gn-res128': gn_gan.ResGenerator128,
     'gn-res256': gn_gan.ResGenerator256,
 }
 
 net_D_models = {
-    'gn-res128': gn_gan.ResDiscriminator128,
     'gn-res256': gn_gan.ResDiscriminator256,
 }
 
 datasets = [
-    'imagenet.128.hdf5',
-    'imagenet.256.hdf5',
-    'celebhq.128.hdf5',
     'celebhq.256.hdf5',
-    'lsun_church_outdoor.128.hdf5',
     'lsun_church_outdoor.256.hdf5',
     'lsun_bedroom.256.raw',
 ]
