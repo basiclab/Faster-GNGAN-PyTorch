@@ -5,26 +5,29 @@ import torch.nn as nn
 import torch.nn.init as init
 
 
-def apply_grad_norm_hook(x, f):
-    def hook(grad, f):
+def apply_grad_norm_hook(x, f, alpha=1.0):
+    def hook(grad, f, alpha):
         with torch.no_grad():
             grad_norm = torch.norm(
                 torch.flatten(grad, start_dim=1), p=2, dim=1) * grad.shape[0]
             f = f[:, 0]
-            scale = grad_norm / ((grad_norm + torch.abs(f)) ** 2)
+            scale = (
+                (grad_norm + (1 - alpha) * torch.abs(f) ** alpha) /
+                ((grad_norm + torch.abs(f) ** alpha) ** 2))
             scale = scale.view(-1, 1, 1, 1)
         grad = grad * scale
         return grad
-    x.register_hook(partial(hook, f=f))
+    x.register_hook(partial(hook, f=f, alpha=alpha))
     return x
 
 
-def grad_norm(net_D, *args, **kwargs):
+def normalize_gradient(net_D, *args, alpha=1.0, create_graph=True, **kwargs):
     for x in args:
         x.requires_grad_(True)
     fx = net_D(*args, **kwargs)
     grads = torch.autograd.grad(
-        fx, args, torch.ones_like(fx), create_graph=True, retain_graph=True)
+        fx, args, torch.ones_like(fx),
+        create_graph=create_graph, retain_graph=True)
     grad_norms = []
     for grad in grads:
         grad_norm = (torch.flatten(grad, start_dim=1) ** 2).sum(1)
@@ -32,7 +35,7 @@ def grad_norm(net_D, *args, **kwargs):
     grad_norm = torch.sqrt(torch.stack(grad_norms, dim=1).sum(dim=1))
     grad_norm = grad_norm.view(
         -1, *[1 for _ in range(len(fx.shape) - 1)])
-    fx = (fx / (grad_norm + torch.abs(fx)))
+    fx = (fx / (grad_norm + torch.abs(fx) ** alpha))
     return fx
 
 
@@ -449,17 +452,21 @@ class ResDiscriminator256(nn.Module):
 
 
 class GenDis(nn.Module):
-    def __init__(self, net_G, net_D):
+    def __init__(self, net_G, net_D, alpha=1.0, create_graph=True):
         super().__init__()
         self.net_G = net_G
         self.net_D = net_D
+        self.alpha = alpha
+        self.create_graph = create_graph
 
     def forward(self, z, real=None, return_fake=False):
         if real is not None:
             with torch.no_grad():
                 fake = self.net_G(z).detach()
             x = torch.cat([real, fake], dim=0)
-            pred = grad_norm(self.net_D, x)
+            pred = normalize_gradient(
+                self.net_D, x, alpha=self.alpha,
+                create_graph=self.create_graph)
             # pred = self.net_D(x)
             pred_real, pred_fake = torch.split(
                 pred, [real.shape[0], fake.shape[0]])
@@ -470,5 +477,8 @@ class GenDis(nn.Module):
         else:
             fake = self.net_G(z)
             pred_fake = self.net_D(fake)
-            apply_grad_norm_hook(fake, pred_fake)
-            return pred_fake
+            apply_grad_norm_hook(fake, pred_fake, alpha=self.alpha)
+            if return_fake:
+                return pred_fake, fake
+            else:
+                return pred_fake

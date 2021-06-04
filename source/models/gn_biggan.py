@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-from .gn_gan import apply_grad_norm_hook, grad_norm
+from .gn_gan import apply_grad_norm_hook, normalize_gradient
 
 
 sn = partial(torch.nn.utils.spectral_norm, eps=1e-6)
@@ -269,7 +269,7 @@ class GenDis(nn.Module):
                 x_fake = self.net_G(z, y_fake).detach()
             x = torch.cat([x_real, x_fake], dim=0)
             y = torch.cat([y_real, y_fake], dim=0)
-            pred = grad_norm(self.net_D, x, y=y)
+            pred = normalize_gradient(self.net_D, x, y=y)
             pred_real, pred_fake = torch.split(
                 pred, [x_real.shape[0], x_fake.shape[0]])
             if return_fake:

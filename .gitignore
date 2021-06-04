@@ -19,6 +19,7 @@ stats
 *.png
 _cache_*
 figures
+*.mp4
 
 # pdf
 *.pdf
