@@ -131,7 +131,7 @@ def eval_save(rank, world_size):
                 images, FLAGS.fid_stats, use_torch=FLAGS.eval_use_torch,
                 verbose=True)
             print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
-        if FLAGS.save is not None:
+        if FLAGS.save:
             save_images(images, FLAGS.save, verbose=True)
     del ckpt, net_G
 
