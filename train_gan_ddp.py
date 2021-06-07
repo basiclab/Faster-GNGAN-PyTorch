@@ -53,7 +53,7 @@ flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
-flags.DEFINE_float('alpha', 0.5, 'alpha')
+flags.DEFINE_float('alpha', 1.0, 'alpha')
 flags.DEFINE_integer('seed', 0, "random seed")
 # ema
 flags.DEFINE_float('ema_decay', 0.9999, "ema decay rate")
