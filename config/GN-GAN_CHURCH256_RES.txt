@@ -16,6 +16,7 @@
 --num_workers=8
 --sample_size=64
 --sample_step=500
+--save_step=20000
 --seed=0
 --total_steps=100000
 --z_dim=128

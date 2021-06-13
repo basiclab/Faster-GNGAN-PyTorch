@@ -32,14 +32,14 @@ class HDF5Dataset(Dataset):
         os.makedirs(os.path.dirname(h5_path), exist_ok=True)
         with h5.File(h5_path, 'w') as f:
             shape = dataset[0][0].shape
-            print(shape)
             f.create_dataset(
                 'images', shape=(0, *shape), dtype='uint8',
                 maxshape=(len(dataset), *shape), compression=compression)
             f.create_dataset(
                 'labels', shape=(0,), dtype='int64',
                 maxshape=(len(dataset),), compression=compression)
-        for x, y in tqdm(dataloader, dynamic_ncols=True, leave=False):
+        for x, y in tqdm(dataloader, dynamic_ncols=True, leave=False,
+                         desc='create hdf5'):
             x = (x * 255).byte().numpy()    # [0, 255]
             y = y.long().numpy()
             with h5.File(h5_path, 'a') as f:
@@ -66,11 +66,6 @@ class HDF5Dataset(Dataset):
         return image, label
 
 
-class CenterCropLongEdge(object):
-    def __call__(self, img):
-        return transforms.functional.center_crop(img, min(img.size))
-
-
 def get_dataset(name, in_memory=True):
     """Get datasets
 
@@ -86,7 +81,6 @@ def get_dataset(name, in_memory=True):
     assert fmt in ['raw', 'hdf5']
     if fmt == 'raw':
         transform = transforms.Compose([
-            CenterCropLongEdge(),
             transforms.Resize((img_size, img_size)),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
@@ -94,7 +88,6 @@ def get_dataset(name, in_memory=True):
         ])
     if fmt == 'hdf5':
         transform = transforms.Compose([
-            CenterCropLongEdge(),
             transforms.Resize((img_size, img_size)),
             transforms.ToTensor()
         ])
@@ -106,7 +99,7 @@ def get_dataset(name, in_memory=True):
     target_transform = (lambda x: 0)
 
     assert name in [
-        'cifar10', 'stl10', 'imagenet', 'celebhq', 'ffhq',
+        'cifar10', 'stl10', 'imagenet', 'celebhq', 'celebhq_train', 'ffhq',
         'lsun_church', 'lsun_bedroom', 'lsun_horse']
     if name == 'cifar10':
         dataset = datasets.CIFAR10(
@@ -119,7 +112,10 @@ def get_dataset(name, in_memory=True):
             './data/imagenet/train', transform=transform)
     if name == 'celebhq':
         dataset = datasets.ImageFolder(
-            './data/celebhq/', transform=transform)
+            f'./data/celebhq/{img_size}', transform=transform)
+    if name == 'celebhq_train':
+        dataset = datasets.ImageFolder(
+            f'./data/celebhq/{img_size}train', transform=transform)
     if name == 'ffhq':
         dataset = datasets.ImageFolder(
             './data/ffhq/', transform=transform)

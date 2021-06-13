@@ -14,8 +14,6 @@
 --n_dis=5
 --num_images=10000
 --num_workers=8
---port=55556
---noresume
 --sample_size=64
 --sample_step=500
 --save_step=20000

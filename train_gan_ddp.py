@@ -23,17 +23,24 @@ from metrics.score.both import get_inception_score_and_fid
 
 
 net_G_models = {
+    'gn-res128': gn_gan.ResGenerator128,
     'gn-res256': gn_gan.ResGenerator256,
 }
 
 net_D_models = {
+    'gn-res128': gn_gan.ResDiscriminator128,
     'gn-res256': gn_gan.ResDiscriminator256,
 }
 
 datasets = [
+    'celebhq_train.128.hdf5',
+    'celebhq_train.128.raw',
     'celebhq.256.hdf5',
+    'celebhq.256.raw',
     'lsun_church_outdoor.256.hdf5',
+    'lsun_church_outdoor.256.raw',
     'lsun_bedroom.256.raw',
+    'lsun_horse.256.raw',
 ]
 
 
@@ -172,7 +179,14 @@ def train(rank, world_size):
     device = torch.device('cuda:%d' % rank)
 
     local_batch_size = FLAGS.batch_size // world_size
-    dataset = get_dataset(FLAGS.dataset)
+    # Wait main process to create hdf5 for small dataset
+    if rank == 0:
+        dataset = get_dataset(FLAGS.dataset)
+        dist.barrier()
+    else:
+        dist.barrier()
+        dataset = get_dataset(FLAGS.dataset)
+    dist.barrier()
     sampler = torch.utils.data.DistributedSampler(
         dataset, shuffle=True, seed=FLAGS.seed, drop_last=True)
     dataloader = torch.utils.data.DataLoader(
@@ -256,8 +270,8 @@ def train(rank, world_size):
             writer.add_image('real_sample', make_grid((real_sample + 1) / 2))
             writer.flush()
 
-    # ema
-    ema(net_G, ema_G, decay=0)
+        # ema
+        ema(net_G, ema_G, decay=0)
 
     looper = infiniteloop(dataloader, sampler, step=start - 1)
     with trange(start, FLAGS.total_steps + 1,
