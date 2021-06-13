@@ -17,9 +17,11 @@ from tqdm import trange, tqdm
 from source.models import gn_gan
 from source.losses import HingeLoss
 from source.datasets import get_dataset
-from source.utils import ema, save_images, module_no_grad, set_seed
+from source.utils import ema, module_no_grad, set_seed
 from source.optim import Adam
-from metrics.score.both import get_inception_score_and_fid
+from metrics.score.both import (
+    get_inception_score_and_fid_from_directory,
+    get_inception_score_and_fid)
 
 
 net_G_models = {
@@ -107,7 +109,9 @@ def eval_save(rank, world_size):
         fake_list = [torch.empty_like(fake) for _ in range(world_size)]
         dist.all_gather(fake_list, fake)
         if rank == 0:
-            save_image(torch.cat(fake_list, dim=0), 'fixed_sample.png')
+            save_image(
+                torch.cat(fake_list, dim=0),
+                os.path.join(FLAGS.logdir, 'fixed_sample.png'))
 
     # generate images for calculating IS and FID
     if rank != 0:
@@ -115,19 +119,29 @@ def eval_save(rank, world_size):
             pass
     else:
         images = []
+        counter = 0
+        if FLAGS.save:
+            os.makedirs(FLAGS.save)
         with tqdm(total=FLAGS.num_images, ncols=0,
                   desc='Sample images') as pbar:
             for batch_images in image_generator(net_G):
                 images.append(batch_images)
+                if FLAGS.save:
+                    for image in batch_images:
+                        save_image(
+                            image, os.path.join(FLAGS.save, f'{counter}.png'))
                 pbar.update(len(batch_images))
         images = torch.cat(images, dim=0)
         if FLAGS.eval:
-            (IS, IS_std), FID = get_inception_score_and_fid(
-                images, FLAGS.fid_stats, use_torch=FLAGS.eval_use_torch,
-                verbose=True)
+            if FLAGS.save:
+                (IS, IS_std), FID = get_inception_score_and_fid_from_directory(
+                    FLAGS.save, FLAGS.fid_stats, num_images=FLAGS.num_images,
+                    use_torch=FLAGS.eval_use_torch, verbose=True)
+            else:
+                (IS, IS_std), FID = get_inception_score_and_fid(
+                    images, FLAGS.fid_stats, use_torch=FLAGS.eval_use_torch,
+                    verbose=True)
             print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
-        if FLAGS.save:
-            save_images(images, FLAGS.save, verbose=True)
     del ckpt, net_G
 
 

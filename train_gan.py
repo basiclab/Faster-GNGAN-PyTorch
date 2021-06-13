@@ -80,7 +80,7 @@ flags.DEFINE_string('save', "", 'load model and save sample images to dir')
 # debug
 flags.DEFINE_bool('record_grad_norm', False, 'record grad norm')
 flags.DEFINE_bool('record_D_weight_norm', False, 'record D weight norm')
-flags.DEFINE_float('alpha', 0.5, 'alpha')
+flags.DEFINE_float('alpha', 1.0, 'alpha')
 
 
 device = torch.device('cuda:0')
