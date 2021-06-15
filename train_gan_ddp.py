@@ -14,7 +14,7 @@ from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange, tqdm
 
-from source.models import gn_gan
+from source.models import gn_gan, sn_gan
 from source.losses import HingeLoss
 from source.datasets import get_dataset
 from source.utils import ema, module_no_grad, set_seed
@@ -25,13 +25,21 @@ from metrics.score.both import (
 
 
 net_G_models = {
+    'sn-res128': sn_gan.ResGenerator128,
     'gn-res128': gn_gan.ResGenerator128,
     'gn-res256': gn_gan.ResGenerator256,
 }
 
 net_D_models = {
+    'sn-res128': sn_gan.ResDiscriminator128,
     'gn-res128': gn_gan.ResDiscriminator128,
     'gn-res256': gn_gan.ResDiscriminator256,
+}
+
+net_GD_models = {
+    'sn-res128': sn_gan.GenDis,
+    'gn-res128': gn_gan.GenDis,
+    'gn-res256': gn_gan.GenDis,
 }
 
 datasets = [
@@ -219,7 +227,7 @@ def train(rank, world_size):
     ema_G = DDP(ema_G, device_ids=[rank], output_device=rank)
     net_D = net_D_models[FLAGS.arch]().to(device)
     net_D = DDP(net_D, device_ids=[rank], output_device=rank)
-    net_GD = gn_gan.GenDis(net_G, net_D, alpha=FLAGS.alpha)
+    net_GD = net_GD_models[FLAGS.arch](net_G, net_D, alpha=FLAGS.alpha)
 
     # loss
     loss_fn = HingeLoss()
