@@ -7,7 +7,7 @@ from torchvision import datasets
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from torchvision.transforms.functional import to_pil_image
-from tqdm import tqdm
+from tqdm import trange
 
 
 class HDF5Dataset(Dataset):
@@ -38,16 +38,18 @@ class HDF5Dataset(Dataset):
             f.create_dataset(
                 'labels', shape=(0,), dtype='int64',
                 maxshape=(len(dataset),), compression=compression)
-        for x, y in tqdm(dataloader, dynamic_ncols=True, leave=False,
-                         desc='create hdf5'):
-            x = (x * 255).byte().numpy()    # [0, 255]
-            y = y.long().numpy()
-            with h5.File(h5_path, 'a') as f:
-                f['images'].resize(
-                    f['images'].shape[0] + x.shape[0], axis=0)
-                f['images'][-x.shape[0]:] = x
-                f['labels'].resize(
-                    f['labels'].shape[0] + y.shape[0], axis=0)
+        with trange(len(dataset), dynamic_ncols=True, leave=False,
+                    desc='create hdf5') as pbar:
+            for x, y in dataloader:
+                x = (x * 255).byte().numpy()    # [0, 255]
+                y = y.long().numpy()
+                with h5.File(h5_path, 'a') as f:
+                    f['images'].resize(
+                        f['images'].shape[0] + x.shape[0], axis=0)
+                    f['images'][-x.shape[0]:] = x
+                    f['labels'].resize(
+                        f['labels'].shape[0] + y.shape[0], axis=0)
+                pbar.update(x.shape[0])
 
     def __len__(self):
         return self.num_images
@@ -137,38 +139,42 @@ def get_dataset(name, in_memory=True):
 
 
 if __name__ == "__main__":
-    # dataset = get_dataset('ffhq.1024.hdf5')
+    # dataset = get_dataset('ffhq.1024.raw')
     # print(len(dataset))
     # image, label = dataset[0]
     # print('image', image.shape, image.dtype, image.min(), image.max())
     # print('label', label.shape, label.dtype)
     # torchvision.utils.save_image((image + 1) / 2, 'ffhq.png')
 
-    dataset = get_dataset('lsun_horse.256.hdf5')
-    print(len(dataset))
-    image, label = dataset[0]
-    print('image', image.shape, image.dtype, image.min(), image.max())
-    print('label', label.shape, label.dtype)
-    torchvision.utils.save_image((image + 1) / 2, 'lsun_horse.png')
+    # dataset = get_dataset('lsun_horse.256.raw')
+    # print(len(dataset))
+    # image, label = dataset[0]
+    # print('image', image.shape, image.dtype, image.min(), image.max())
+    # print('label', label.shape, label.dtype)
+    # torchvision.utils.save_image((image + 1) / 2, 'lsun_horse.png')
 
-    # dataset = get_dataset(
-    #     'celebhq.256.hdf5', aug_transform=transforms.Compose([]))
+    # dataset = get_dataset('celebhq_train.128.hdf5')
     # print(len(dataset))
     # image, label = dataset[0]
     # print('image', image.shape, image.dtype, image.min(), image.max())
     # print('label', label.shape, label.dtype)
     # torchvision.utils.save_image((image + 1) / 2, 'celebhq.png')
 
-    # dataset = get_dataset(
-    #     'lsun_church_outdoor.256.hdf5', aug_transform=transforms.Compose([]))
+    # dataset = get_dataset('celebhq.256.hdf5')
     # print(len(dataset))
     # image, label = dataset[0]
     # print('image', image.shape, image.dtype, image.min(), image.max())
     # print('label', label.shape, label.dtype)
-    # torchvision.utils.save_image((image + 1) / 2, 'lsun_church_outdoor.png')
+    # torchvision.utils.save_image((image + 1) / 2, 'celebhq.png')
 
-    # dataset = get_dataset(
-    #     'lsun_bedroom.256.hdf5', aug_transform=transforms.Compose([]))
+    dataset = get_dataset('lsun_church.256.hdf5')
+    print(len(dataset))
+    image, label = dataset[0]
+    print('image', image.shape, image.dtype, image.min(), image.max())
+    print('label', label.shape, label.dtype)
+    torchvision.utils.save_image((image + 1) / 2, 'lsun_church.png')
+
+    # dataset = get_dataset('lsun_bedroom.256.raw')
     # print(len(dataset))
     # image, label = dataset[0]
     # print('image', image.shape, image.dtype, image.min(), image.max())

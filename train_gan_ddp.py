@@ -39,8 +39,8 @@ datasets = [
     'celebhq_train.128.raw',
     'celebhq.256.hdf5',
     'celebhq.256.raw',
-    'lsun_church_outdoor.256.hdf5',
-    'lsun_church_outdoor.256.raw',
+    'lsun_church.256.hdf5',
+    'lsun_church.256.raw',
     'lsun_bedroom.256.raw',
     'lsun_horse.256.raw',
 ]
@@ -137,6 +137,7 @@ def eval_save(rank, world_size):
                     for image in batch_images:
                         save_image(
                             image, os.path.join(FLAGS.save, f'{counter}.png'))
+                        counter += 1
                 pbar.update(len(batch_images))
         images = torch.cat(images, dim=0)
         if FLAGS.eval:

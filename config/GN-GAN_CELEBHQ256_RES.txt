@@ -2,14 +2,14 @@
 --G_lr=0.0002
 --accumulation=1
 --arch=gn-res256
---batch_size=128
+--batch_size=64
 --dataset=celebhq.256.hdf5
 --ema_decay=0.9999
 --ema_start=10000
 --eval_step=1000
 --noeval_use_torch
 --fid_stats=./stats/celebhq.all.256.npz
---logdir=./logs/GN-GAN_CELEBHQ256_RES_0
+--logdir=./logs/GN-GAN_CELEBHQ256_RES_0_BS64
 --lr_decay_start=100000
 --n_dis=5
 --num_images=10000
