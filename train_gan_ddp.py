@@ -206,13 +206,7 @@ def train(rank, world_size):
 
     local_batch_size = FLAGS.batch_size // world_size
     # Wait main process to create hdf5 for small dataset
-    if rank == 0:
-        dataset = get_dataset(FLAGS.dataset)
-        dist.barrier()
-    else:
-        dist.barrier()
-        dataset = get_dataset(FLAGS.dataset)
-    dist.barrier()
+    dataset = get_dataset(FLAGS.dataset)
     sampler = torch.utils.data.DistributedSampler(
         dataset, shuffle=True, seed=FLAGS.seed, drop_last=True)
     dataloader = torch.utils.data.DataLoader(
