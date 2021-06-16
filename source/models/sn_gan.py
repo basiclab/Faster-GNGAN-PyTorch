@@ -246,6 +246,41 @@ class ResGenerator128(nn.Module):
         return self.output(self.blocks(inputs))
 
 
+class ResGenerator256(nn.Module):
+    def __init__(self, z_dim):
+        super().__init__()
+        self.linear = spectral_norm(nn.Linear(z_dim, 4 * 4 * 1024))
+        self.blocks = nn.Sequential(
+            GenBlock(1024, 1024),
+            GenBlock(1024, 512),
+            GenBlock(512, 512),
+            GenBlock(512, 256),
+            GenBlock(256, 128),
+            GenBlock(128, 64),
+        )
+        self.output = nn.Sequential(
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            spectral_norm(nn.Conv2d(64, 3, 3, stride=1, padding=1)),
+            nn.Tanh(),
+        )
+        # initialize weight
+        self.initialize()
+
+    def initialize(self):
+        init.xavier_uniform_(self.linear.weight)
+        init.zeros_(self.linear.bias)
+        for m in self.output.modules():
+            if isinstance(m, nn.Conv2d):
+                init.xavier_uniform_(m.weight)
+                init.zeros_(m.bias)
+
+    def forward(self, z):
+        inputs = self.linear(z)
+        inputs = inputs.view(-1, 1024, 4, 4)
+        return self.output(self.blocks(inputs))
+
+
 class OptimizedDisblock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
@@ -364,6 +399,31 @@ class ResDiscriminator128(nn.Module):
             DisBlock(64, 128, down=True),
             DisBlock(128, 256, down=True),
             DisBlock(256, 512, down=True),
+            DisBlock(512, 1024, down=True),
+            DisBlock(1024, 1024),
+            nn.ReLU(inplace=True))
+        self.linear = spectral_norm(nn.Linear(1024, 1))
+        self.initialize()
+
+    def initialize(self):
+        init.xavier_uniform_(self.linear.weight)
+        init.zeros_(self.linear.bias)
+
+    def forward(self, x):
+        x = self.model(x).sum(dim=[2, 3])
+        x = self.linear(x)
+        return x
+
+
+class ResDiscriminator256(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.model = nn.Sequential(
+            OptimizedDisblock(3, 64),
+            DisBlock(64, 128, down=True),
+            DisBlock(128, 256, down=True),
+            DisBlock(256, 512, down=True),
+            DisBlock(512, 512, down=True),
             DisBlock(512, 1024, down=True),
             DisBlock(1024, 1024),
             nn.ReLU(inplace=True))
