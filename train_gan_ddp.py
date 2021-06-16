@@ -26,18 +26,21 @@ from metrics.score.both import (
 
 net_G_models = {
     'sn-res128': sn_gan.ResGenerator128,
+    'sn-res256': sn_gan.ResGenerator256,
     'gn-res128': gn_gan.ResGenerator128,
     'gn-res256': gn_gan.ResGenerator256,
 }
 
 net_D_models = {
     'sn-res128': sn_gan.ResDiscriminator128,
+    'sn-res256': sn_gan.ResDiscriminator256,
     'gn-res128': gn_gan.ResDiscriminator128,
     'gn-res256': gn_gan.ResDiscriminator256,
 }
 
 net_GD_models = {
     'sn-res128': sn_gan.GenDis,
+    'sn-res256': sn_gan.GenDis,
     'gn-res128': gn_gan.GenDis,
     'gn-res256': gn_gan.GenDis,
 }
