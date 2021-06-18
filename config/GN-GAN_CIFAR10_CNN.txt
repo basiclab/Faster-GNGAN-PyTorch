@@ -5,12 +5,12 @@
 --cr=0
 --dataset=cifar10.32.raw
 --eval_use_torch
---fid_stats=./stats/cifar10.train.npz
+--fid_stats=./stats/cifar10.test.npz
 --logdir=./logs/GN-GAN_CIFAR10_CNN_0
 --loss=bce
 --lr_decay_start=200000
 --n_dis=1
---num_images=50000
+--num_images=10000
 --sample_size=64
 --sample_step=500
 --seed=0

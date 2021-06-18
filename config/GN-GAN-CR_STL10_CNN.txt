@@ -10,7 +10,7 @@
 --loss=bce
 --lr_decay_start=200000
 --n_dis=1
---num_images=50000
+--num_images=10000
 --sample_size=64
 --sample_step=500
 --seed=0

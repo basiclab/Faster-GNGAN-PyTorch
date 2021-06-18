@@ -11,12 +11,12 @@
 --ema_start=1000
 --eval_step=5000
 --eval_use_torch
---fid_stats=./stats/cifar10.train.npz
+--fid_stats=./stats/cifar10.test.npz
 --logdir=./logs/GN-cGAN-CR_CIFAR10_BIGGAN_0
 --lr_decay_start=125000
 --n_classes=10
 --n_dis=4
---num_images=50000
+--num_images=10000
 --num_workers=8
 --sample_size=64
 --sample_step=500
