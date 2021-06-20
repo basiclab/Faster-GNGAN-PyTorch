@@ -104,5 +104,4 @@ if __name__ == '__main__':
             for i, file in enumerate(tqdm(files, dynamic_ncols=True)):
                 key = f'{i}'.encode()
                 img = open(file, 'rb').read()
-                # val = buf.getvalue()
                 txn.put(key, img)
