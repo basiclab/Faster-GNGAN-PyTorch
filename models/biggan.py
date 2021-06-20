@@ -5,9 +5,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-from .gn_gan import apply_grad_norm_hook, normalize_gradient
-
-
 sn = partial(torch.nn.utils.spectral_norm, eps=1e-6)
 
 
@@ -98,7 +95,7 @@ class GenBlock(nn.Module):
 
 
 class Generator32(nn.Module):
-    def __init__(self, ch=64, n_classes=10, z_dim=128):
+    def __init__(self, z_dim=128, n_classes=10, ch=64):
         super().__init__()
         # channels_multipler = [4, 4, 4, 4]
         self.linear = sn(nn.Linear(z_dim, (ch * 4) * 4 * 4))
@@ -123,7 +120,7 @@ class Generator32(nn.Module):
 
 
 class Generator128(nn.Module):
-    def __init__(self, ch=96, n_classes=1000, z_dim=128, shared_dim=128):
+    def __init__(self, z_dim=128, n_classes=1000, ch=96, shared_dim=128):
         super().__init__()
         channels_multipler = [16, 16, 8, 4, 2, 1]
         num_slots = len(channels_multipler)
@@ -210,7 +207,7 @@ class DisBlock(nn.Module):
 
 
 class Discriminator32(nn.Module):
-    def __init__(self, ch=64, n_classes=10):
+    def __init__(self, n_classes=10, ch=64):
         super().__init__()
         self.fp16 = False
         # channels_multipler = [2, 2, 2, 2]
@@ -233,7 +230,7 @@ class Discriminator32(nn.Module):
 
 
 class Discriminator128(nn.Module):
-    def __init__(self, ch=96, n_classes=1000):
+    def __init__(self, n_classes=1000, ch=96):
         super().__init__()
         # channels_multipler = [1, 2, 4, 8, 16, 16]
         self.blocks = nn.Sequential(
@@ -255,32 +252,6 @@ class Discriminator128(nn.Module):
         h = self.blocks(x).sum(dim=[2, 3])
         h = self.linear(h) + (self.embedding(y) * h).sum(dim=1, keepdim=True)
         return h
-
-
-class GenDis(nn.Module):
-    def __init__(self, net_G, net_D):
-        super().__init__()
-        self.net_G = net_G
-        self.net_D = net_D
-
-    def forward(self, z, y_fake, x_real=None, y_real=None, return_fake=False):
-        if x_real is not None and y_real is not None:
-            with torch.no_grad():
-                x_fake = self.net_G(z, y_fake).detach()
-            x = torch.cat([x_real, x_fake], dim=0)
-            y = torch.cat([y_real, y_fake], dim=0)
-            pred = normalize_gradient(self.net_D, x, y=y)
-            pred_real, pred_fake = torch.split(
-                pred, [x_real.shape[0], x_fake.shape[0]])
-            if return_fake:
-                return pred_real, pred_fake, x_fake
-            else:
-                return pred_real, pred_fake
-        else:
-            fake = self.net_G(z, y_fake)
-            pred_fake = self.net_D(fake, y=y_fake)
-            apply_grad_norm_hook(fake, pred_fake)
-            return pred_fake
 
 
 def res32_weights_init(m):

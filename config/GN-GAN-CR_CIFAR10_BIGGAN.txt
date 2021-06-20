@@ -1,19 +1,21 @@
 --dataset=cifar10.32
---arch=dcgan.32
---loss=bce
---total_steps=200000
---lr_decay_start=200000
---batch_size=64
+--arch=biggan.32
+--loss=hinge
+--total_steps=125000
+--lr_decay_start=125000
+--batch_size=50
 --num_workers=8
 --D_lr=0.0002
---G_lr=0.0002
---n_dis=1
+--G_lr=0.0001
+--betas=0.0
+--betas=0.999
+--n_dis=4
 --z_dim=128
 --cr=5
---n_classes=1
+--n_classes=10
 
 --ema_decay=0.9999
---ema_start=0
+--ema_start=1000
 
 --sample_step=500
 --sample_size=64
@@ -21,4 +23,4 @@
 --save_step=20000
 --num_images=50000
 --fid_stats=./stats/cifar10.train.npz
---logdir=./logs/GN-GAN-CR_CIFAR10_CNN_0
+--logdir=./logs/GN-GAN_CIFAR10_BIGGAN_0

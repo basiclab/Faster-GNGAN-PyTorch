@@ -5,91 +5,73 @@ import datetime
 from shutil import copyfile
 
 import torch
-import torch.optim as optim
 import torch.distributed as dist
+from absl import flags, app
+from tensorboardX import SummaryWriter
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.multiprocessing import Process
-from absl import flags, app
 from torchvision.utils import make_grid, save_image
-from tensorboardX import SummaryWriter
 from tqdm import trange, tqdm
 
-from source.models import gn_gan, sn_gan
-from source.losses import HingeLoss
-from source.datasets import get_dataset
-from source.utils import ema, module_no_grad, set_seed
-from source.optim import Adam
+from datasets import get_dataset
+from losses import HingeLoss
+from models import resnet
+from models.gradnorm import normalize_gradient_D, normalize_gradient_G
+from utils import ema, module_no_grad, set_seed
+from optim import Adam
 from metrics.score.both import (
     get_inception_score_and_fid_from_directory,
     get_inception_score_and_fid)
 
 
 net_G_models = {
-    'sn-res128': sn_gan.ResGenerator128,
-    'sn-res256': sn_gan.ResGenerator256,
-    'gn-res128': gn_gan.ResGenerator128,
-    'gn-res256': gn_gan.ResGenerator256,
+    'resnet.128': resnet.ResGenerator128,
+    'resnet.256': resnet.ResGenerator256,
 }
 
 net_D_models = {
-    'sn-res128': sn_gan.ResDiscriminator128,
-    'sn-res256': sn_gan.ResDiscriminator256,
-    'gn-res128': gn_gan.ResDiscriminator128,
-    'gn-res256': gn_gan.ResDiscriminator256,
-}
-
-net_GD_models = {
-    'sn-res128': sn_gan.GenDis,
-    'sn-res256': sn_gan.GenDis,
-    'gn-res128': gn_gan.GenDis,
-    'gn-res256': gn_gan.GenDis,
+    'resnet.128': resnet.ResDiscriminator128,
+    'resnet.256': resnet.ResDiscriminator256,
 }
 
 datasets = [
-    'celebhq_train.128.hdf5',
-    'celebhq_train.128.raw',
-    'celebhq.256.hdf5',
-    'celebhq.256.raw',
-    'lsun_church.256.hdf5',
-    'lsun_church.256.raw',
-    'lsun_bedroom.256.raw',
-    'lsun_horse.256.raw',
+    'celebahq.128',
+    'celebahq.256',
+    'lsun_church.256',
+    'lsun_bedroom.256',
+    'lsun_horse.256',
 ]
 
 
 FLAGS = flags.FLAGS
 # resume
 flags.DEFINE_bool('resume', False, 'resume from logdir')
+flags.DEFINE_bool('eval', False, 'load model and evalutate it')
+flags.DEFINE_string('save', "", 'load model and save sample images to dir')
 # model and training
-flags.DEFINE_enum('dataset', 'celebhq.256.hdf5', datasets, "select dataset")
-flags.DEFINE_enum('arch', 'gn-res256', net_G_models.keys(), "architecture")
+flags.DEFINE_enum('dataset', 'celebahq.256', datasets, "select dataset")
+flags.DEFINE_enum('arch', 'resnet.256', net_G_models.keys(), "architecture")
 flags.DEFINE_integer('total_steps', 100000, "total number of training steps")
-flags.DEFINE_integer('lr_decay_start', 100000, 'apply linearly decay to lr')
-flags.DEFINE_integer('batch_size', 128, "batch size")
-flags.DEFINE_integer('num_workers', 8, "dataloader workers")
+flags.DEFINE_integer('batch_size', 64, "batch size")
 flags.DEFINE_integer('accumulation', 1, 'gradient accumulation')
-flags.DEFINE_float('G_lr', 2e-4, "Generator learning rate")
+flags.DEFINE_integer('num_workers', 8, "dataloader workers")
 flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
+flags.DEFINE_float('G_lr', 2e-4, "Generator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
-flags.DEFINE_float('alpha', 1.0, 'alpha')
 flags.DEFINE_integer('seed', 0, "random seed")
 # ema
 flags.DEFINE_float('ema_decay', 0.9999, "ema decay rate")
 flags.DEFINE_integer('ema_start', 5000, "start step for ema")
 # logging
-flags.DEFINE_bool('eval_use_torch', False, 'calculate IS and FID on gpu')
+flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
+flags.DEFINE_integer('sample_size', 64, "sampling size of images")
 flags.DEFINE_integer('eval_step', 1000, "evaluate FID and Inception Score")
 flags.DEFINE_integer('save_step', 20000, "save model every this step")
 flags.DEFINE_integer('num_images', 10000, '# images for evaluation')
-flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
-flags.DEFINE_integer('sample_size', 64, "sampling size of images")
-flags.DEFINE_string('logdir', './logs/GN-GAN_CELEBHQ256_RES_0', 'log folder')
-flags.DEFINE_string('fid_stats', './stats/celebhq.val.256.npz', 'FID cache')
-# generate
-flags.DEFINE_bool('eval', False, 'load model and evaluate sample images')
-flags.DEFINE_string('save', "", 'load model and save sample images to dir')
+flags.DEFINE_string('fid_stats', './stats/celebahq.all.256.npz', 'FID cache')
+flags.DEFINE_string('logdir', './logs/GN-GAN_CELEBAHQ256_RES_0', 'log folder')
 # distributed
 flags.DEFINE_string('port', '55556', 'distributed port')
 
@@ -155,11 +137,10 @@ def eval_save(rank, world_size):
             if FLAGS.save:
                 (IS, IS_std), FID = get_inception_score_and_fid_from_directory(
                     FLAGS.save, FLAGS.fid_stats, num_images=FLAGS.num_images,
-                    use_torch=FLAGS.eval_use_torch, verbose=True)
+                    verbose=True)
             else:
                 (IS, IS_std), FID = get_inception_score_and_fid(
-                    images, FLAGS.fid_stats, use_torch=FLAGS.eval_use_torch,
-                    verbose=True)
+                    images, FLAGS.fid_stats, verbose=True)
             print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
     del ckpt, net_G
 
@@ -178,10 +159,7 @@ def evaluate(net_G):
                 pbar.update(len(batch_images))
         images = torch.cat(images, dim=0)
         (IS, IS_std), FID = get_inception_score_and_fid(
-            images,
-            fid_stats_path=FLAGS.fid_stats,
-            use_torch=FLAGS.eval_use_torch,
-            verbose=True)
+            images, fid_stats_path=FLAGS.fid_stats, verbose=True)
         del images
     dist.barrier()
     return (IS, IS_std), FID
@@ -225,7 +203,6 @@ def train(rank, world_size):
     ema_G = DDP(ema_G, device_ids=[rank], output_device=rank)
     net_D = net_D_models[FLAGS.arch]().to(device)
     net_D = DDP(net_D, device_ids=[rank], output_device=rank)
-    net_GD = net_GD_models[FLAGS.arch](net_G, net_D, alpha=FLAGS.alpha)
 
     # loss
     loss_fn = HingeLoss()
@@ -233,13 +210,6 @@ def train(rank, world_size):
     # optimizer
     optim_G = Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
     optim_D = Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
-
-    # scheduler
-    def decay_rate(step):
-        period = max(FLAGS.total_steps - FLAGS.lr_decay_start, 1)
-        return 1 - max(step - FLAGS.lr_decay_start, 0) / period
-    sched_G = optim.lr_scheduler.LambdaLR(optim_G, lr_lambda=decay_rate)
-    sched_D = optim.lr_scheduler.LambdaLR(optim_D, lr_lambda=decay_rate)
 
     if rank == 0:
         writer = SummaryWriter(FLAGS.logdir)
@@ -259,8 +229,6 @@ def train(rank, world_size):
         ema_G.load_state_dict(ckpt['ema_G'])
         optim_G.load_state_dict(ckpt['optim_G'])
         optim_D.load_state_dict(ckpt['optim_D'])
-        sched_G.load_state_dict(ckpt['sched_G'])
-        sched_D.load_state_dict(ckpt['sched_D'])
         fixed_z = torch.cat(ckpt['fixed_z'], dim=0).to(device)
         fixed_z = torch.split(fixed_z, FLAGS.sample_size // world_size, dim=0)
         # start value
@@ -311,7 +279,14 @@ def train(rank, world_size):
                     real = next(x).to(device)
                     z = torch.randn(
                         local_batch_size, FLAGS.z_dim, device=device)
-                    pred_real, pred_fake = net_GD(z, real)
+
+                    with torch.no_grad():
+                        fake = net_G(z).detach()
+                    real_fake = torch.cat([real, fake], dim=0)
+                    pred = normalize_gradient_D(net_D, real_fake)
+                    pred_real, pred_fake = torch.split(
+                        pred, [real.shape[0], fake.shape[0]])
+
                     loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
                     loss = loss / FLAGS.accumulation
                     loss.backward()
@@ -340,7 +315,9 @@ def train(rank, world_size):
                 for _ in range(FLAGS.accumulation):
                     z = torch.randn(
                         local_batch_size * 2, FLAGS.z_dim, device=device)
-                    loss = loss_fn(net_GD(z)) / FLAGS.accumulation
+                    fake = net_G(z)
+                    pred_fake = normalize_gradient_G(net_D, fake)
+                    loss = loss_fn(pred_fake) / FLAGS.accumulation
                     loss.backward()
             optim_G.step()
 
@@ -350,10 +327,6 @@ def train(rank, world_size):
             else:
                 decay = FLAGS.ema_decay
             ema(net_G, ema_G, decay)
-
-            # scheduler
-            sched_G.step()
-            sched_D.step()
 
             # sample from fixed z
             if step == 1 or step % FLAGS.sample_step == 0:
@@ -387,8 +360,6 @@ def train(rank, world_size):
                         'ema_G': ema_G.state_dict(),
                         'optim_G': optim_G.state_dict(),
                         'optim_D': optim_D.state_dict(),
-                        'sched_G': sched_G.state_dict(),
-                        'sched_D': sched_D.state_dict(),
                         'fixed_z': fixed_z,
                         'best_IS': best_IS,
                         'best_FID': best_FID,

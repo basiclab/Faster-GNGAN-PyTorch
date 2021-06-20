@@ -10,60 +10,75 @@ from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
 
-from source.models import gn_biggan
-from source.losses import HingeLoss
-from source.datasets import get_dataset
-from source.utils import (
-    ema, save_images, infiniteloop, set_seed, module_no_grad)
+from datasets import get_dataset
+from losses import HingeLoss, BCEWithLogits, BCE, Wasserstein
+from models import resnet, dcgan, biggan
+from models.gradnorm import normalize_gradient_D, normalize_gradient_G
+from utils import ema, save_images, infiniteloop, set_seed, module_no_grad
 from metrics.score.both import get_inception_score_and_fid
 
 
 net_G_models = {
-    'gn-biggan32': gn_biggan.Generator32,
+    'dcgan.32': dcgan.Generator32,
+    'dcgan.48': dcgan.Generator48,
+    'resnet.32': resnet.ResGenerator32,
+    'resnet.48': resnet.ResGenerator48,
+    'biggan.32': biggan.Generator32,
 }
 
 net_D_models = {
-    'gn-biggan32': gn_biggan.Discriminator32,
+    'dcgan.32': dcgan.Discriminator32,
+    'dcgan.48': dcgan.Discriminator48,
+    'resnet.32': resnet.ResDiscriminator32,
+    'resnet.48': resnet.ResDiscriminator48,
+    'biggan.32': biggan.Discriminator32,
+}
+
+loss_fns = {
+    'hinge': HingeLoss,
+    'bce': BCEWithLogits,
+    'bce-nologits': BCE,
+    'wass': Wasserstein,
 }
 
 
-datasets = ['cifar10.32.raw']
+datasets = ['cifar10.32', 'stl10.48']
 
 
 FLAGS = flags.FLAGS
 # resume
-flags.DEFINE_bool('resume', False, 'resume from logdir')
+flags.DEFINE_bool('resume', False, 'resume from checkpoint')
+flags.DEFINE_bool('eval', False, 'load model and evaluate it')
+flags.DEFINE_string('save', "", 'load model and save sample images to dir')
 # model and training
-flags.DEFINE_enum('dataset', 'cifar10.32.raw', datasets, "dataset")
-flags.DEFINE_enum('arch', 'gn-biggan32', net_G_models.keys(), "architecture")
-flags.DEFINE_integer('ch', 64, 'base channel size of BigGAN')
-flags.DEFINE_integer('n_classes', 10, 'the number of classes in dataset')
-flags.DEFINE_integer('total_steps', 125000, "total number of training steps")
-flags.DEFINE_integer('lr_decay_start', 125000, 'apply linearly decay to lr')
-flags.DEFINE_integer('batch_size', 50, "batch size")
+flags.DEFINE_enum('dataset', 'cifar10.32', datasets, "select dataset")
+flags.DEFINE_enum('arch', 'resnet.32', net_G_models.keys(), "architecture")
+flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
+flags.DEFINE_integer('total_steps', 200000, "total number of training steps")
+flags.DEFINE_integer('lr_decay_start', 0, 'apply linearly decay to lr')
+flags.DEFINE_integer('batch_size', 64, "batch size")
 flags.DEFINE_integer('num_workers', 8, "dataloader workers")
-flags.DEFINE_float('G_lr', 1e-4, "Generator learning rate")
-flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
-flags.DEFINE_multi_float('betas', [0.0, 0.999], "for Adam")
-flags.DEFINE_integer('n_dis', 4, "update Generator every this steps")
+flags.DEFINE_float('D_lr', 4e-4, "Discriminator learning rate")
+flags.DEFINE_float('G_lr', 2e-4, "Generator learning rate")
+flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
+flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
 flags.DEFINE_float('cr', 0, "weight for consistency regularization")
 flags.DEFINE_integer('seed', 0, "random seed")
+# conditional
+flags.DEFINE_integer('n_classes', 1, 'the number of classes in dataset')
 # ema
 flags.DEFINE_float('ema_decay', 0.9999, "ema decay rate")
-flags.DEFINE_integer('ema_start', 1000, "start step for ema")
+flags.DEFINE_integer('ema_start', 0, "start step for ema")
 # logging
-flags.DEFINE_bool('eval_use_torch', False, 'calculate IS and FID on gpu')
+flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
+flags.DEFINE_integer('sample_size', 64, "sampling size of images")
 flags.DEFINE_integer('eval_step', 5000, "evaluate FID and Inception Score")
 flags.DEFINE_integer('save_step', 20000, "save model every this step")
 flags.DEFINE_integer('num_images', 50000, '# images for evaluation')
-flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
-flags.DEFINE_integer('sample_size', 64, "sampling size of images")
-flags.DEFINE_string('logdir', './logs/GN-BIGGAN_CIFAR10_0', 'log folder')
 flags.DEFINE_string('fid_stats', './stats/cifar10.train.npz', 'FID cache')
-# generate sample
-flags.DEFINE_bool('generate', False, 'generate images from pretrained model')
-flags.DEFINE_string('output', None, 'path to output directory')
+flags.DEFINE_string('logdir', './logs/GN-GAN_CIFAR10_RES_0', 'log folder')
+# generate
 
 
 device = torch.device('cuda:0')
@@ -74,7 +89,7 @@ def generate_images(net_G):
     with torch.no_grad():
         for _ in trange(0, FLAGS.num_images, FLAGS.batch_size,
                         ncols=0, leave=False):
-            z = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
+            z = torch.randn(FLAGS.batch_size * 2, FLAGS.z_dim).to(device)
             y = torch.randint(FLAGS.n_classes, (FLAGS.batch_size,)).to(device)
             fake = (net_G(z, y) + 1) / 2
             images.append(fake.cpu())
@@ -82,32 +97,29 @@ def generate_images(net_G):
     return images[:FLAGS.num_images]
 
 
-def generate():
-    net_G = net_G_models[FLAGS.arch](FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim)
-    net_G = net_G.to(device)
+def eval_save():
+    net_G = net_G_models[FLAGS.arch](FLAGS.z_dim, FLAGS.n_classes).to(device)
     ckpt = torch.load(os.path.join(FLAGS.logdir, 'best_model.pt'))
-    net_G.load_state_dict(ckpt['ema_G'])
+    net_G.load_state_dict(ckpt['net_G'])
 
     images = generate_images(net_G=net_G)
-    if FLAGS.output is not None:
-        save_path = FLAGS.output
-    else:
-        save_path = os.path.join(FLAGS.logdir, 'output')
-    save_images(images, save_path, verbose=True)
-    (IS, IS_std), FID = get_inception_score_and_fid(
-        images, FLAGS.fid_stats, use_torch=FLAGS.eval_use_torch, verbose=True)
-    print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
+    if FLAGS.eval:
+        (IS, IS_std), FID = get_inception_score_and_fid(
+            images, FLAGS.fid_stats, verbose=True)
+        print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
+    if FLAGS.save is not None:
+        save_images(images, FLAGS.save, verbose=True)
 
 
 def evaluate(net_G):
     images = generate_images(net_G=net_G)
     (IS, IS_std), FID = get_inception_score_and_fid(
-        images, FLAGS.fid_stats, use_torch=FLAGS.eval_use_torch, verbose=True)
+        images, FLAGS.fid_stats, verbose=True)
     del images
     return (IS, IS_std), FID
 
 
-def consistency_loss(net_D, x_real, y_real, pred_real,
+def consistency_loss(net_D, real, y_real, pred_real,
                      transform=transforms.Compose([
                         transforms.Lambda(lambda x: (x + 1) / 2),
                         transforms.ToPILImage(mode='RGB'),
@@ -116,12 +128,12 @@ def consistency_loss(net_D, x_real, y_real, pred_real,
                         transforms.ToTensor(),
                         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
                      ])):
-
-    aug_real = x_real.detach().clone().cpu()
+    aug_real = real.detach().clone().cpu()
     for idx, img in enumerate(aug_real):
         aug_real[idx] = transform(img)
     aug_real = aug_real.to(device)
-    loss = ((net_D(aug_real, y=y_real) - pred_real) ** 2).mean()
+    pred_aug = normalize_gradient_D(net_D, aug_real, y=y_real)
+    loss = ((pred_aug - pred_real) ** 2).mean()
     return loss
 
 
@@ -136,18 +148,15 @@ def train():
     looper = infiniteloop(dataloader)
 
     # model
-    net_G = net_G_models[FLAGS.arch](FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim)
-    net_G = net_G.to(device)
-    ema_G = net_G_models[FLAGS.arch](FLAGS.ch, FLAGS.n_classes, FLAGS.z_dim)
-    ema_G = ema_G.to(device)
-    net_D = net_D_models[FLAGS.arch](FLAGS.ch, FLAGS.n_classes).to(device)
-    net_GD = gn_biggan.GenDis(net_G, net_D)
+    net_G = net_G_models[FLAGS.arch](FLAGS.z_dim, FLAGS.n_classes).to(device)
+    ema_G = net_G_models[FLAGS.arch](FLAGS.z_dim, FLAGS.n_classes).to(device)
+    net_D = net_D_models[FLAGS.arch](FLAGS.n_classes).to(device)
 
     # ema
     ema(net_G, ema_G, decay=0)
 
     # loss
-    loss_fn = HingeLoss()
+    loss_fn = loss_fns[FLAGS.loss]()
 
     # optimizer
     optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
@@ -185,7 +194,7 @@ def train():
         best_IS, best_FID = ckpt['best_IS'], ckpt['best_FID']
         del ckpt
     else:
-        # sample fixed z and y
+        # sample fixed z
         fixed_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
         fixed_y = torch.randint(
             FLAGS.n_classes, (FLAGS.sample_size,)).to(device)
@@ -214,10 +223,18 @@ def train():
             for _ in range(FLAGS.n_dis):
                 optim_D.zero_grad()
                 x_real, y_real = next(x).to(device), next(y).to(device)
-                z_ = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
-                y_ = torch.randint(
-                    FLAGS.n_classes, (FLAGS.batch_size,)).to(device)
-                pred_real, pred_fake = net_GD(z_, y_, x_real, y_real)
+
+                with torch.no_grad():
+                    z_ = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
+                    y_fake = torch.randint(
+                        FLAGS.n_classes, (FLAGS.batch_size,)).to(device)
+                    x_fake = net_G(z_, y_fake).detach()
+                x_real_fake = torch.cat([x_real, x_fake], dim=0)
+                y_real_fake = torch.cat([y_real, y_fake], dim=0)
+                pred = normalize_gradient_D(net_D, x_real_fake, y=y_real_fake)
+                pred_real, pred_fake = torch.split(
+                    pred, [x_real.shape[0], x_fake.shape[0]])
+
                 loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
                 if FLAGS.cr > 0:
                     loss_cr = consistency_loss(
@@ -248,14 +265,16 @@ def train():
                 loss_fake='%.3f' % loss_fake)
 
             # Generator
-            optim_G.zero_grad()
             with module_no_grad(net_D):
-                z_ = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
+                optim_G.zero_grad()
+                z_ = torch.randn(FLAGS.batch_size * 2, FLAGS.z_dim).to(device)
                 y_ = torch.randint(
                     FLAGS.n_classes, (FLAGS.batch_size,)).to(device)
-                loss = loss_fn(net_GD(z_, y_))
+                fake = net_G(z_, y_)
+                pred_fake = normalize_gradient_G(net_D, fake, y=y_)
+                loss = loss_fn(pred_fake)
                 loss.backward()
-            optim_G.step()
+                optim_G.step()
 
             # ema
             if step < FLAGS.ema_start:
@@ -268,7 +287,7 @@ def train():
             sched_G.step()
             sched_D.step()
 
-            # sample from fixed z and y
+            # sample from fixed z
             if step == 1 or step % FLAGS.sample_step == 0:
                 with torch.no_grad():
                     fake_net = net_G(fixed_z, fixed_y).cpu()
@@ -285,13 +304,13 @@ def train():
             if step == 1 or step % FLAGS.eval_step == 0:
                 (IS, IS_std), FID = evaluate(net_G)
                 (IS_ema, IS_std_ema), FID_ema = evaluate(ema_G)
-                if not math.isnan(FID_ema) and not math.isnan(best_FID):
-                    save_as_best = (FID_ema < best_FID)
+                if not math.isnan(FID) and not math.isnan(best_FID):
+                    save_as_best = (FID < best_FID)
                 else:
-                    save_as_best = (IS_ema > best_IS)
+                    save_as_best = (IS > best_IS)
                 if save_as_best:
-                    best_IS = IS_ema
-                    best_FID = FID_ema
+                    best_IS = IS
+                    best_FID = FID
                 ckpt = {
                     'net_G': net_G.state_dict(),
                     'net_D': net_D.state_dict(),
@@ -301,7 +320,6 @@ def train():
                     'sched_G': sched_G.state_dict(),
                     'sched_D': sched_D.state_dict(),
                     'fixed_z': fixed_z,
-                    'fixed_y': fixed_y,
                     'best_IS': best_IS,
                     'best_FID': best_FID,
                     'step': step,
@@ -339,8 +357,8 @@ def train():
 
 def main(argv):
     set_seed(FLAGS.seed)
-    if FLAGS.generate:
-        generate()
+    if FLAGS.eval or FLAGS.save:
+        eval_save()
     else:
         train()
 
