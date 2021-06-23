@@ -78,7 +78,6 @@ flags.DEFINE_integer('save_step', 20000, "save model every this step")
 flags.DEFINE_integer('num_images', 50000, '# images for evaluation')
 flags.DEFINE_string('fid_stats', './stats/cifar10.train.npz', 'FID cache')
 flags.DEFINE_string('logdir', './logs/GN-GAN_CIFAR10_RES_0', 'log folder')
-# generate
 
 
 device = torch.device('cuda:0')
@@ -107,7 +106,7 @@ def eval_save():
         (IS, IS_std), FID = get_inception_score_and_fid(
             images, FLAGS.fid_stats, verbose=True)
         print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
-    if FLAGS.save is not None:
+    if FLAGS.save:
         save_images(images, FLAGS.save, verbose=True)
 
 

@@ -167,15 +167,10 @@ def evaluate(net_G):
 
 def infiniteloop(dataloader, sampler, step=0):
     epoch = step // len(dataloader)
-    start_idx = step % len(dataloader)
     while True:
         sampler.set_epoch(epoch)
-        for idx, (x, y) in enumerate(dataloader):
-            if idx < start_idx:
-                continue
-            else:
-                yield x, y
-        start_idx = 0
+        for x, y in enumerate(dataloader):
+            yield x, y
         epoch += 1
 
 

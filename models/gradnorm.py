@@ -20,12 +20,11 @@ def normalize_gradient_G(net_D, x, **kwargs):
 
 def normalize_gradient_D(net_D, x, **kwargs):
     x.requires_grad_(True)
-    fx = net_D(x, **kwargs)
+    f = net_D(x, **kwargs)
     grad = torch.autograd.grad(
-        fx, [x], torch.ones_like(fx),
+        f, [x], torch.ones_like(f),
         create_graph=True, retain_graph=True)[0]
-    grad_norm = torch.sqrt((torch.flatten(grad, start_dim=1) ** 2).sum(1))
-    grad_norm = grad_norm.view(
-        -1, *[1 for _ in range(len(fx.shape) - 1)])
-    fx = (fx / (grad_norm + torch.abs(fx)))
-    return fx
+    grad_norm = torch.norm(torch.flatten(grad, start_dim=1), p=2, dim=1)
+    grad_norm = grad_norm.view(-1, 1)
+    f = (f / (grad_norm + torch.abs(f)))
+    return f

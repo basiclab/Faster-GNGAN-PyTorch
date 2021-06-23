@@ -1,6 +1,6 @@
 # Gradient Normalization for Generative Adversarial Networks
 
-The author's official implementation of Gradient Normalized GAN (GN-GAN).
+The authors' official implementation of Gradient Normalized GAN (GN-GAN).
 
 ## Recommended System Requirements
 - CUDA 10.2
@@ -10,6 +10,10 @@ The author's official implementation of Gradient Normalized GAN (GN-GAN).
     # update `pip` for installing latest tensorboard.
     pip install -U pip setuptools
     pip install -r requirements.txt
+    ```
+- Initialize submodules
+    ```sh
+    git submodule update --init
     ```
 
 ## Datasets
@@ -32,7 +36,7 @@ The author's official implementation of Gradient Normalized GAN (GN-GAN).
 
         We split data into train test split by filename, the test set contains images from 27001.jpg to 30000.jpg.
         ```
-        python dataset.py path/to/celebahq/128/train ./data/celebahq/256
+        python dataset.py path/to/celebahq/128/train ./data/celebahq/128
         ```
     Our folder structure:
     ```
