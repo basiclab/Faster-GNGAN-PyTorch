@@ -19,7 +19,7 @@ from models import resnet
 from models.gradnorm import normalize_gradient_D, normalize_gradient_G
 from utils import ema, module_no_grad, set_seed
 from optim import Adam
-from metrics.score.both import (
+from pytorch_gan_metrics import (
     get_inception_score_and_fid_from_directory,
     get_inception_score_and_fid)
 

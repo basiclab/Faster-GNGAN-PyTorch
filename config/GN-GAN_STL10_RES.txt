@@ -19,6 +19,6 @@
 --sample_step=500
 --eval_step=5000
 --save_step=20000
---num_images=10000
+--num_images=50000
 --fid_stats=./stats/stl10.unlabeled.48.npz
 --logdir=./logs/GN-GAN_STL10_RES_0

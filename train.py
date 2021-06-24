@@ -15,7 +15,7 @@ from losses import HingeLoss, BCEWithLogits, BCE, Wasserstein
 from models import resnet, dcgan, biggan
 from models.gradnorm import normalize_gradient_D, normalize_gradient_G
 from utils import ema, save_images, infiniteloop, set_seed, module_no_grad
-from metrics.score.both import get_inception_score_and_fid
+from pytorch_gan_metrics import get_inception_score_and_fid
 
 
 net_G_models = {

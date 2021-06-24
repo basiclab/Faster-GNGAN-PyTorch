@@ -4,6 +4,7 @@ lmdb
 tqdm
 numpy==1.19.5
 scipy==1.5.4
+pytorch-gan-metrics==0.2.0
 tensorboard==2.4.1
 tensorboardX==2.1
 tensorflow==2.4.0
