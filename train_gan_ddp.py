@@ -136,27 +136,28 @@ def eval_save(rank, world_size):
         for batch_images in image_generator(net_G):
             pass
     else:
-        images = []
-        counter = 0
         if FLAGS.save:
+            counter = 0
             os.makedirs(FLAGS.save)
-        with tqdm(total=FLAGS.num_images, ncols=0,
-                  desc='Sample images') as pbar:
+        else:
+            images = []
+        with tqdm(total=FLAGS.num_images, ncols=0, desc='Sampling') as pbar:
             for batch_images in image_generator(net_G):
-                images.append(batch_images)
                 if FLAGS.save:
                     for image in batch_images:
                         save_image(
                             image, os.path.join(FLAGS.save, f'{counter}.png'))
                         counter += 1
+                else:
+                    images.append(batch_images)
                 pbar.update(len(batch_images))
-        images = torch.cat(images, dim=0)
         if FLAGS.eval:
             if FLAGS.save:
                 (IS, IS_std), FID = get_inception_score_and_fid_from_directory(
                     FLAGS.save, FLAGS.fid_stats, num_images=FLAGS.num_images,
                     use_torch=FLAGS.eval_use_torch, verbose=True)
             else:
+                images = torch.cat(images, dim=0)
                 (IS, IS_std), FID = get_inception_score_and_fid(
                     images, FLAGS.fid_stats, use_torch=FLAGS.eval_use_torch,
                     verbose=True)
@@ -189,15 +190,10 @@ def evaluate(net_G):
 
 def infiniteloop(dataloader, sampler, step=0):
     epoch = step // len(dataloader)
-    start_idx = step % len(dataloader)
     while True:
         sampler.set_epoch(epoch)
-        for idx, (x, y) in enumerate(dataloader):
-            if idx < start_idx:
-                continue
-            else:
-                yield x, y
-        start_idx = 0
+        for x, y in dataloader:
+            yield x, y
         epoch += 1
 
 
