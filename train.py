@@ -9,13 +9,13 @@ from torchvision import transforms
 from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
+from pytorch_gan_metrics import get_inception_score_and_fid
 
 from datasets import get_dataset
-from losses import HingeLoss, BCEWithLogits, BCE, Wasserstein
+from losses import HingeLoss, BCEWithLogits, Wasserstein
 from models import resnet, dcgan, biggan
 from models.gradnorm import normalize_gradient_D, normalize_gradient_G
 from utils import ema, save_images, infiniteloop, set_seed, module_no_grad
-from pytorch_gan_metrics import get_inception_score_and_fid
 
 
 net_G_models = {
@@ -37,7 +37,6 @@ net_D_models = {
 loss_fns = {
     'hinge': HingeLoss,
     'bce': BCEWithLogits,
-    'bce-nologits': BCE,
     'wass': Wasserstein,
 }
 
@@ -270,10 +269,11 @@ def train():
                 y_ = torch.randint(
                     FLAGS.n_classes, (FLAGS.batch_size,)).to(device)
                 fake = net_G(z_, y_)
-                pred_fake = normalize_gradient_G(net_D, fake, y=y_)
-                loss = loss_fn(pred_fake)
+                pred_fake, h = normalize_gradient_G(net_D, loss_fn, fake, y=y_)
+                loss = pred_fake.mean()
                 loss.backward()
                 optim_G.step()
+                h.remove()
 
             # ema
             if step < FLAGS.ema_start:
@@ -318,6 +318,7 @@ def train():
                     'optim_D': optim_D.state_dict(),
                     'sched_G': sched_G.state_dict(),
                     'sched_D': sched_D.state_dict(),
+                    'fixed_y': fixed_y,
                     'fixed_z': fixed_z,
                     'best_IS': best_IS,
                     'best_FID': best_FID,

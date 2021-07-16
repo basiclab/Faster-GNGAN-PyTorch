@@ -71,6 +71,19 @@ class Discriminator(nn.Module):
                 init.normal_(m.weight, std=0.02)
                 init.zeros_(m.bias)
 
+    def rescale_weight(self, min_norm=1.0, max_norm=1.33):
+        a = 1.0
+        with torch.no_grad():
+            for m in self.modules():
+                if isinstance(m, (nn.Conv2d, nn.Linear)):
+                    w_norm = m.weight.norm(p=2)
+                    print(m, w_norm)
+                    w_norm = max(w_norm, min_norm)
+                    w_norm = min(w_norm, max_norm)
+                    a = a * w_norm
+                    m.weight.data.div_(w_norm)
+                    m.bias.data.div_(a)
+
     def forward(self, x, *args, **kwargs):
         x = self.main(x)
         x = torch.flatten(x, start_dim=1)

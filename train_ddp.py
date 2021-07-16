@@ -311,9 +311,10 @@ def train(rank, world_size):
                     z = torch.randn(
                         local_batch_size * 2, FLAGS.z_dim, device=device)
                     fake = net_G(z)
-                    pred_fake = normalize_gradient_G(net_D, fake)
-                    loss = loss_fn(pred_fake) / FLAGS.accumulation
+                    pred_fake, h = normalize_gradient_G(net_D, loss_fn, fake)
+                    loss = pred_fake.mean() / FLAGS.accumulation
                     loss.backward()
+                    h.remove()
             optim_G.step()
 
             # ema

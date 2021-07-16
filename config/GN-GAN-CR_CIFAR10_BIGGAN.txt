@@ -23,4 +23,4 @@
 --save_step=20000
 --num_images=50000
 --fid_stats=./stats/cifar10.train.npz
---logdir=./logs/GN-GAN_CIFAR10_BIGGAN_0
+--logdir=./logs/GN-GAN-CR_CIFAR10_BIGGAN_0
