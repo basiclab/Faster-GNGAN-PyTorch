@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 
+from gradnorm import scale_module
+
 
 class Generator(nn.Module):
     def __init__(self, z_dim, M=4):
@@ -71,18 +73,12 @@ class Discriminator(nn.Module):
                 init.normal_(m.weight, std=0.02)
                 init.zeros_(m.bias)
 
+    @torch.no_grad()
     def rescale_weight(self, min_norm=1.0, max_norm=1.33):
-        a = 1.0
-        with torch.no_grad():
-            for m in self.modules():
-                if isinstance(m, (nn.Conv2d, nn.Linear)):
-                    w_norm = m.weight.norm(p=2)
-                    print(m, w_norm)
-                    w_norm = max(w_norm, min_norm)
-                    w_norm = min(w_norm, max_norm)
-                    a = a * w_norm
-                    m.weight.data.div_(w_norm)
-                    m.bias.data.div_(a)
+        base_scale = 1.0
+        for module in self.modules():
+            base_scale = scale_module(module, base_scale, min_norm, max_norm)
+        return base_scale
 
     def forward(self, x, *args, **kwargs):
         x = self.main(x)
@@ -109,3 +105,35 @@ class Discriminator32(Discriminator):
 class Discriminator48(Discriminator):
     def __init__(self, *args):
         super().__init__(M=48)
+
+
+if __name__ == '__main__':
+    x = torch.randn(1, 3, 32, 32, requires_grad=True)
+
+    net_D = Discriminator32()
+    f = net_D(x)
+    grad_f = torch.autograd.grad(f.sum(), x)[0]
+    grad_norm = torch.norm(torch.flatten(grad_f, start_dim=1), p=2, dim=1)
+    grad_norm = grad_norm.view(-1, 1)
+    f_hat = f / (grad_norm + torch.abs(f))
+    print(
+        f'{f_hat[0].item():.7f}, {f[0].item():.7f}, {grad_norm[0].item():.7f}')
+
+    for _ in range(10):
+        net_D.rescale_weight()
+        f_scaled = net_D(x)
+        grad_f_scaled = torch.autograd.grad(f_scaled.sum(), x)[0]
+        grad_norm_scaled = torch.norm(
+            torch.flatten(grad_f_scaled, start_dim=1), p=2, dim=1)
+        grad_norm_scaled = grad_norm_scaled.view(-1, 1)
+        f_hat_scaled = f_scaled / (grad_norm_scaled + torch.abs(f_scaled))
+        print(
+            f'{f_hat_scaled[0].item():.7f}, '
+            f'{f_scaled[0].item():.7f}, ',
+            f'{grad_norm_scaled[0].item():.7f}')
+
+        assert torch.allclose(
+            f / f_scaled, grad_norm / grad_norm_scaled, rtol=1e-04, atol=1e-06)
+        assert torch.allclose(
+            f_hat, f_hat_scaled, rtol=1e-04, atol=1e-06)
+        print('Pass')

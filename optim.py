@@ -25,10 +25,8 @@ def adam(params: List[Tensor],
     for i, param in enumerate(params):
 
         grad = grads[i]
-        if beta1 != 0:
-            exp_avg = exp_avgs[i]
-        if beta2 != 0:
-            exp_avg_sq = exp_avg_sqs[i]
+        exp_avg = exp_avgs[i]
+        exp_avg_sq = exp_avg_sqs[i]
         step = state_steps[i]
 
         bias_correction1 = 1 - beta1 ** step
@@ -130,14 +128,8 @@ class Adam(Optimizer):
             beta1, beta2 = group['betas']
             params_with_grad = []
             grads = []
-            if beta1 != 0:
-                exp_avgs = []
-            else:
-                exp_avgs = None
-            if beta2 != 0:
-                exp_avg_sqs = []
-            else:
-                exp_avg_sqs = None
+            exp_avgs = []
+            exp_avg_sqs = []
             max_exp_avg_sqs = []
             state_steps = []
 
@@ -156,19 +148,21 @@ class Adam(Optimizer):
                         if beta1 != 0:
                             state['exp_avg'] = torch.zeros_like(
                                 p, memory_format=torch.preserve_format)
+                        else:
+                            state['exp_avg'] = 0
                         # Exponential moving average of squared gradient values
                         if beta2 != 0:
                             state['exp_avg_sq'] = torch.zeros_like(
                                 p, memory_format=torch.preserve_format)
+                        else:
+                            state['exp_avg_sq'] = 0
                         if group['amsgrad']:
                             # Maintains max of all exp. moving avg. of sq.
                             # grad. values
                             state['max_exp_avg_sq'] = torch.zeros_like(
                                 p, memory_format=torch.preserve_format)
-                    if beta1 != 0:
-                        exp_avgs.append(state['exp_avg'])
-                    if beta2 != 0:
-                        exp_avg_sqs.append(state['exp_avg_sq'])
+                    exp_avgs.append(state['exp_avg'])
+                    exp_avg_sqs.append(state['exp_avg_sq'])
 
                     if group['amsgrad']:
                         max_exp_avg_sqs.append(state['max_exp_avg_sq'])

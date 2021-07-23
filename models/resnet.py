@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 
+from gradnorm import scale_module
+
 
 class GenBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -169,13 +171,30 @@ class ResGenerator256(nn.Module):
         return self.output(self.blocks(inputs))
 
 
-class OptimizedDisblock(nn.Module):
+class ReScaleBlock(nn.Module):
+    @torch.no_grad()
+    def rescale_weight(self, base_scale, min_norm, max_norm):
+        residual_scale = base_scale
+        for module in self.residual.modules():
+            residual_scale = scale_module(
+                module, residual_scale, min_norm, max_norm)
+
+        for module in self.shortcut.modules():
+            shortcut_scale = scale_module(
+                module, base_scale, min_norm, max_norm)
+        self.shortcut_scale *= residual_scale / shortcut_scale
+
+        return residual_scale
+
+
+class OptimizedDisblock(ReScaleBlock):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         # shortcut
         self.shortcut = nn.Sequential(
             nn.AvgPool2d(2),
             nn.Conv2d(in_channels, out_channels, 1, 1, 0))
+        self.shortcut_scale = 1
         # residual
         self.residual = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, 3, 1, 1),
@@ -192,10 +211,10 @@ class OptimizedDisblock(nn.Module):
                 init.zeros_(m.bias)
 
     def forward(self, x):
-        return self.residual(x) + self.shortcut(x)
+        return self.residual(x) + self.shortcut(x) / self.shortcut_scale
 
 
-class DisBlock(nn.Module):
+class DisBlock(ReScaleBlock):
     def __init__(self, in_channels, out_channels, down=False):
         super().__init__()
         # shortcut
@@ -205,6 +224,7 @@ class DisBlock(nn.Module):
                 nn.Conv2d(in_channels, out_channels, 1, 1, 0))
         if down:
             shortcut.append(nn.AvgPool2d(2))
+        self.shortcut_scale = 1
         self.shortcut = nn.Sequential(*shortcut)
         # residual
         residual = [
@@ -226,10 +246,21 @@ class DisBlock(nn.Module):
                 init.zeros_(m.bias)
 
     def forward(self, x):
-        return (self.residual(x) + self.shortcut(x))
+        return self.residual(x) + self.shortcut(x) / self.shortcut_scale
 
 
-class ResDiscriminator32(nn.Module):
+class ReScaleModel(nn.Module):
+    def rescale_weight(self, min_norm=1.0, max_norm=1.33):
+        base_scale = 1
+        for block in self.model:
+            if isinstance(block, (OptimizedDisblock, DisBlock)):
+                base_scale = block.rescale_weight(
+                    base_scale, min_norm, max_norm)
+        base_scale = scale_module(self.linear, base_scale, min_norm, max_norm)
+        return base_scale
+
+
+class ResDiscriminator32(ReScaleModel):
     def __init__(self, *args):
         super().__init__()
         self.model = nn.Sequential(
@@ -254,7 +285,7 @@ class ResDiscriminator32(nn.Module):
         return x
 
 
-class ResDiscriminator48(nn.Module):
+class ResDiscriminator48(ReScaleModel):
     def __init__(self, *args):
         super().__init__()
         self.model = nn.Sequential(
@@ -279,7 +310,7 @@ class ResDiscriminator48(nn.Module):
         return x
 
 
-class ResDiscriminator128(nn.Module):
+class ResDiscriminator128(ReScaleModel):
     def __init__(self):
         super().__init__()
         self.model = nn.Sequential(
@@ -306,7 +337,7 @@ class ResDiscriminator128(nn.Module):
         return x
 
 
-class ResDiscriminator256(nn.Module):
+class ResDiscriminator256(ReScaleModel):
     def __init__(self):
         super().__init__()
         self.model = nn.Sequential(
@@ -332,3 +363,35 @@ class ResDiscriminator256(nn.Module):
         x = torch.flatten(x, start_dim=1)
         x = self.linear(x)
         return x
+
+
+if __name__ == '__main__':
+    x = torch.randn(2, 3, 32, 32, requires_grad=True)
+
+    net_D = ResDiscriminator32()
+    f = net_D(x)
+    grad_f = torch.autograd.grad(f.sum(), x)[0]
+    grad_norm = torch.norm(torch.flatten(grad_f, start_dim=1), p=2, dim=1)
+    grad_norm = grad_norm.view(-1, 1)
+    f_hat = f / (grad_norm + torch.abs(f))
+    print(
+        f'{f_hat[0].item():.7f}, {f[0].item():.7f}, {grad_norm[0].item():.7f}')
+
+    for _ in range(10):
+        net_D.rescale_weight()
+        f_scaled = net_D(x)
+        grad_f_scaled = torch.autograd.grad(f_scaled.sum(), x)[0]
+        grad_norm_scaled = torch.norm(
+            torch.flatten(grad_f_scaled, start_dim=1), p=2, dim=1)
+        grad_norm_scaled = grad_norm_scaled.view(-1, 1)
+        f_hat_scaled = f_scaled / (grad_norm_scaled + torch.abs(f_scaled))
+        print(
+            f'{f_hat_scaled[0].item():.7f}, '
+            f'{f_scaled[0].item():.7f}, ',
+            f'{grad_norm_scaled[0].item():.7f}')
+
+        assert torch.allclose(
+            f / f_scaled, grad_norm / grad_norm_scaled, rtol=1e-04, atol=1e-06)
+        assert torch.allclose(
+            f_hat, f_hat_scaled, rtol=1e-04, atol=1e-06)
+        print('Pass')

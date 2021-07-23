@@ -16,6 +16,7 @@ from losses import HingeLoss, BCEWithLogits, Wasserstein
 from models import resnet, dcgan, biggan
 from models.gradnorm import normalize_gradient_D, normalize_gradient_G
 from utils import ema, save_images, infiniteloop, set_seed, module_no_grad
+from optim import Adam
 
 
 net_G_models = {
@@ -157,8 +158,8 @@ def train():
     loss_fn = loss_fns[FLAGS.loss]()
 
     # optimizer
-    optim_G = optim.Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
-    optim_D = optim.Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
+    optim_G = Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
+    optim_D = Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
 
     # scheduler
     def decay_rate(step):
@@ -247,6 +248,23 @@ def train():
                 loss_real_sum += loss_real.cpu().item()
                 loss_fake_sum += loss_fake.cpu().item()
                 loss_cr_sum += loss_cr.cpu().item()
+
+            if step % 5000 == 0 and FLAGS.arch.startswith('dcgan'):
+                net_D.rescale_weight(optim_D)
+
+            if FLAGS.arch.startswith('dcgan'):
+                with torch.no_grad():
+                    for i, m in enumerate(net_D.modules()):
+                        if isinstance(m, torch.nn.Conv2d):
+                            w_norm = m.weight.norm(p=2)
+                            b_norm = m.bias.norm(p=2)
+                            writer.add_scalar(f'w_norm/{i}.conv', w_norm, step)
+                            writer.add_scalar(f'b_norm/{i}.conv', b_norm, step)
+                        if isinstance(m, torch.nn.Linear):
+                            w_norm = m.weight.norm(p=2)
+                            b_norm = m.bias.norm(p=2)
+                            writer.add_scalar(f'w_norm/{i}.lin', w_norm, step)
+                            writer.add_scalar(f'b_norm/{i}.lin', b_norm, step)
 
             loss = loss_sum / FLAGS.n_dis
             loss_real = loss_real_sum / FLAGS.n_dis

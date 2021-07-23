@@ -46,3 +46,16 @@ def normalize_gradient_D(net_D, x, **kwargs):
     grad_norm = grad_norm.view(-1, 1)
     f_hat = (f / (grad_norm + torch.abs(f)))
     return f_hat
+
+
+@torch.no_grad()
+def scale_module(module, base_scale=1., min_norm=1.0, max_norm=1.33):
+    if isinstance(module, (torch.nn.Conv2d, torch.nn.Linear)):
+        weight_scale = module.weight.norm(p=2)
+        weight_scale = torch.clamp(
+            weight_scale, min_norm, max_norm)
+        base_scale = base_scale * weight_scale
+        module.weight.data.div_(weight_scale)
+        module.bias.data.div_(base_scale)
+
+    return base_scale
