@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 
-from gradnorm import scale_module
+from .gradnorm import scale_module
 
 
 class Generator(nn.Module):
