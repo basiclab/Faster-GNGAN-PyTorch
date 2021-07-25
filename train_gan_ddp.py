@@ -13,15 +13,15 @@ from absl import flags, app
 from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange, tqdm
+from pytorch_gan_metrics import (
+    get_inception_score_and_fid,
+    get_inception_score_and_fid_from_directory)
 
 from source.models import gn_gan, sn_gan
 from source.losses import HingeLoss
 from source.datasets import get_dataset
 from source.utils import ema, module_no_grad, set_seed
 from source.optim import Adam
-from metrics.score.both import (
-    get_inception_score_and_fid_from_directory,
-    get_inception_score_and_fid)
 
 
 net_G_models = {
@@ -154,7 +154,7 @@ def eval_save(rank, world_size):
         if FLAGS.eval:
             if FLAGS.save:
                 (IS, IS_std), FID = get_inception_score_and_fid_from_directory(
-                    FLAGS.save, FLAGS.fid_stats, num_images=FLAGS.num_images,
+                    FLAGS.save, FLAGS.fid_stats,
                     use_torch=FLAGS.eval_use_torch, verbose=True)
             else:
                 (IS, IS_std), FID = get_inception_score_and_fid(

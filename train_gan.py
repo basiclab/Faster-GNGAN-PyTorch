@@ -9,13 +9,13 @@ from torchvision import transforms
 from torchvision.utils import make_grid, save_image
 from tensorboardX import SummaryWriter
 from tqdm import trange
+from pytorch_gan_metrics import get_inception_score_and_fid
 
 from source.models import gn_gan
 from source.losses import HingeLoss, BCEWithLogits, BCE, Wasserstein
 from source.datasets import get_dataset
 from source.utils import (
     ema, save_images, infiniteloop, set_seed, module_no_grad)
-from metrics.score.both import get_inception_score_and_fid
 
 
 net_G_models = {
