@@ -52,11 +52,12 @@ flags.DEFINE_string('save', "", 'load model and save sample images to dir')
 flags.DEFINE_enum('dataset', 'celebahq.256', datasets, "select dataset")
 flags.DEFINE_enum('arch', 'resnet.256', net_G_models.keys(), "architecture")
 flags.DEFINE_integer('total_steps', 100000, "total number of training steps")
-flags.DEFINE_integer('batch_size', 64, "batch size")
+flags.DEFINE_integer('batch_size_D', 64, "batch size")
+flags.DEFINE_integer('batch_size_G', 128, "batch size")
 flags.DEFINE_integer('accumulation', 1, 'gradient accumulation')
 flags.DEFINE_integer('num_workers', 8, "dataloader workers")
-flags.DEFINE_float('D_lr', 2e-4, "Discriminator learning rate")
-flags.DEFINE_float('G_lr', 2e-4, "Generator learning rate")
+flags.DEFINE_float('lr_D', 2e-4, "Discriminator learning rate")
+flags.DEFINE_float('lr_G', 2e-4, "Generator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
@@ -79,9 +80,9 @@ flags.DEFINE_string('port', '55556', 'distributed port')
 def image_generator(net_G):
     rank = dist.get_rank()
     world_size = dist.get_world_size()
-    local_batch_size = FLAGS.batch_size // world_size
+    local_batch_size = FLAGS.batch_size_G // world_size
     with torch.no_grad():
-        for idx in range(0, FLAGS.num_images, FLAGS.batch_size * 2):
+        for idx in range(0, FLAGS.num_images, FLAGS.batch_size_G * 2):
             z = torch.randn(local_batch_size * 2, FLAGS.z_dim).to(rank)
             fake = (net_G(z) + 1) / 2
             fake_list = [torch.empty_like(fake) for _ in range(world_size)]
@@ -177,14 +178,15 @@ def infiniteloop(dataloader, sampler, step=0):
 def train(rank, world_size):
     device = torch.device('cuda:%d' % rank)
 
-    local_batch_size = FLAGS.batch_size // world_size
+    local_batch_size_D = FLAGS.batch_size_D // world_size
+    local_batch_size_G = FLAGS.batch_size_G // world_size
     # Wait main process to create hdf5 for small dataset
     dataset = get_dataset(FLAGS.dataset)
     sampler = torch.utils.data.DistributedSampler(
         dataset, shuffle=True, seed=FLAGS.seed, drop_last=True)
     dataloader = torch.utils.data.DataLoader(
         dataset=dataset,
-        batch_size=local_batch_size * FLAGS.accumulation * FLAGS.n_dis,
+        batch_size=local_batch_size_D * FLAGS.accumulation * FLAGS.n_dis,
         sampler=sampler,
         num_workers=FLAGS.num_workers,
         drop_last=True)
@@ -203,8 +205,8 @@ def train(rank, world_size):
     loss_fn = HingeLoss()
 
     # optimizer
-    optim_G = Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
-    optim_D = Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
+    optim_G = Adam(net_G.parameters(), lr=FLAGS.lr_G, betas=FLAGS.betas)
+    optim_D = Adam(net_D.parameters(), lr=FLAGS.lr_D, betas=FLAGS.betas)
 
     if rank == 0:
         writer = SummaryWriter(FLAGS.logdir)
@@ -266,14 +268,14 @@ def train(rank, world_size):
             loss_fake_sum = 0
 
             x = next(looper)[0]
-            x = iter(torch.split(x, local_batch_size))
+            x = iter(torch.split(x, local_batch_size_D))
             # Discriminator
             for _ in range(FLAGS.n_dis):
                 optim_D.zero_grad()
                 for _ in range(FLAGS.accumulation):
                     real = next(x).to(device)
                     z = torch.randn(
-                        local_batch_size, FLAGS.z_dim, device=device)
+                        local_batch_size_D, FLAGS.z_dim, device=device)
 
                     with torch.no_grad():
                         fake = net_G(z).detach()
@@ -309,7 +311,7 @@ def train(rank, world_size):
             with module_no_grad(net_D):
                 for _ in range(FLAGS.accumulation):
                     z = torch.randn(
-                        local_batch_size * 2, FLAGS.z_dim, device=device)
+                        local_batch_size_G * 2, FLAGS.z_dim, device=device)
                     fake = net_G(z)
                     pred_fake, h = normalize_gradient_G(net_D, loss_fn, fake)
                     loss = pred_fake.mean() / FLAGS.accumulation

@@ -56,10 +56,11 @@ flags.DEFINE_enum('arch', 'resnet.32', net_G_models.keys(), "architecture")
 flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
 flags.DEFINE_integer('total_steps', 200000, "total number of training steps")
 flags.DEFINE_integer('lr_decay_start', 0, 'apply linearly decay to lr')
-flags.DEFINE_integer('batch_size', 64, "batch size")
+flags.DEFINE_integer('batch_size_D', 64, "batch size")
+flags.DEFINE_integer('batch_size_G', 128, "batch size")
 flags.DEFINE_integer('num_workers', 8, "dataloader workers")
-flags.DEFINE_float('D_lr', 4e-4, "Discriminator learning rate")
-flags.DEFINE_float('G_lr', 2e-4, "Generator learning rate")
+flags.DEFINE_float('lr_D', 4e-4, "Discriminator learning rate")
+flags.DEFINE_float('lr_G', 2e-4, "Generator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
@@ -86,10 +87,11 @@ device = torch.device('cuda:0')
 def generate_images(net_G):
     images = []
     with torch.no_grad():
-        for _ in trange(0, FLAGS.num_images, FLAGS.batch_size,
+        for _ in trange(0, FLAGS.num_images, FLAGS.batch_size_G,
                         ncols=0, leave=False):
-            z = torch.randn(FLAGS.batch_size * 2, FLAGS.z_dim).to(device)
-            y = torch.randint(FLAGS.n_classes, (FLAGS.batch_size,)).to(device)
+            z = torch.randn(FLAGS.batch_size_G, FLAGS.z_dim).to(device)
+            y = torch.randint(
+                FLAGS.n_classes, (FLAGS.batch_size_G,)).to(device)
             fake = (net_G(z, y) + 1) / 2
             images.append(fake.cpu())
     images = torch.cat(images, dim=0)
@@ -140,7 +142,7 @@ def train():
     dataset = get_dataset(FLAGS.dataset)
     dataloader = torch.utils.data.DataLoader(
         dataset=dataset,
-        batch_size=FLAGS.batch_size * FLAGS.n_dis,
+        batch_size=FLAGS.batch_size_D * FLAGS.n_dis,
         shuffle=True,
         num_workers=FLAGS.num_workers,
         drop_last=True)
@@ -158,8 +160,8 @@ def train():
     loss_fn = loss_fns[FLAGS.loss]()
 
     # optimizer
-    optim_G = Adam(net_G.parameters(), lr=FLAGS.G_lr, betas=FLAGS.betas)
-    optim_D = Adam(net_D.parameters(), lr=FLAGS.D_lr, betas=FLAGS.betas)
+    optim_G = Adam(net_G.parameters(), lr=FLAGS.lr_G, betas=FLAGS.betas)
+    optim_D = Adam(net_D.parameters(), lr=FLAGS.lr_D, betas=FLAGS.betas)
 
     # scheduler
     def decay_rate(step):
@@ -216,17 +218,18 @@ def train():
             loss_cr_sum = 0
 
             x, y = next(looper)
-            x = iter(torch.split(x, FLAGS.batch_size))
-            y = iter(torch.split(y, FLAGS.batch_size))
+            x = iter(torch.split(x, FLAGS.batch_size_D))
+            y = iter(torch.split(y, FLAGS.batch_size_D))
             # Discriminator
             for _ in range(FLAGS.n_dis):
                 optim_D.zero_grad()
                 x_real, y_real = next(x).to(device), next(y).to(device)
 
                 with torch.no_grad():
-                    z_ = torch.randn(FLAGS.batch_size, FLAGS.z_dim).to(device)
+                    z_ = torch.randn(
+                        FLAGS.batch_size_D, FLAGS.z_dim).to(device)
                     y_fake = torch.randint(
-                        FLAGS.n_classes, (FLAGS.batch_size,)).to(device)
+                        FLAGS.n_classes, (FLAGS.batch_size_D,)).to(device)
                     x_fake = net_G(z_, y_fake).detach()
                 x_real_fake = torch.cat([x_real, x_fake], dim=0)
                 y_real_fake = torch.cat([y_real, y_fake], dim=0)
@@ -283,9 +286,9 @@ def train():
             # Generator
             with module_no_grad(net_D):
                 optim_G.zero_grad()
-                z_ = torch.randn(FLAGS.batch_size * 2, FLAGS.z_dim).to(device)
+                z_ = torch.randn(FLAGS.batch_size_G, FLAGS.z_dim).to(device)
                 y_ = torch.randint(
-                    FLAGS.n_classes, (FLAGS.batch_size,)).to(device)
+                    FLAGS.n_classes, (FLAGS.batch_size_G,)).to(device)
                 fake = net_G(z_, y_)
                 pred_fake, h = normalize_gradient_G(net_D, loss_fn, fake, y=y_)
                 loss = pred_fake.mean()

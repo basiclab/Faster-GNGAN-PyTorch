@@ -3,10 +3,11 @@
 --loss=hinge
 --total_steps=125000
 --lr_decay_start=125000
---batch_size=50
+--batch_size_D=50
+--batch_size_G=50
 --num_workers=8
---D_lr=0.0002
---G_lr=0.0001
+--lr_D=0.0002
+--lr_G=0.0001
 --betas=0.0
 --betas=0.999
 --n_dis=4

@@ -3,10 +3,11 @@
 --loss=bce
 --total_steps=200000
 --lr_decay_start=200000
---batch_size=64
+--batch_size_D=64
+--batch_size_G=128
 --num_workers=8
---D_lr=0.0002
---G_lr=0.0002
+--lr_D=0.0002
+--lr_G=0.0002
 --n_dis=1
 --z_dim=128
 --cr=5

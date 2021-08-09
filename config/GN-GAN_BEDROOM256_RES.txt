@@ -1,11 +1,12 @@
 --dataset=lsun_bedroom.256
 --arch=resnet.256
 --total_steps=100000
---batch_size=64
+--batch_size_D=64
+--batch_size_G=128
 --accumulation=1
 --num_workers=8
---D_lr=0.0002
---G_lr=0.0002
+--lr_D=0.0002
+--lr_G=0.0002
 --n_dis=5
 --z_dim=128
 
