@@ -223,7 +223,7 @@ class Discriminator32(nn.Module):
         self.embedding = nn.Embedding(n_classes, ch * 4)
         res32_weights_init(self)
 
-    def forward_impl(self, x, y):
+    def forward(self, x, y):
         h = self.blocks(x).sum(dim=[2, 3])
         h = self.linear(h) + (self.embedding(y) * h).sum(dim=1, keepdim=True)
         return h
@@ -248,7 +248,7 @@ class Discriminator128(nn.Module):
         self.embedding = nn.Embedding(n_classes, ch * 16)
         # res128_weights_init(self)
 
-    def forward_impl(self, x, y):
+    def forward(self, x, y):
         h = self.blocks(x).sum(dim=[2, 3])
         h = self.linear(h) + (self.embedding(y) * h).sum(dim=1, keepdim=True)
         return h

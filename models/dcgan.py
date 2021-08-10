@@ -108,9 +108,9 @@ class Discriminator48(Discriminator):
 
 
 if __name__ == '__main__':
-    x = torch.randn(1, 3, 32, 32, requires_grad=True)
+    x = torch.randn(1, 3, 32, 32, requires_grad=True).cuda()
 
-    net_D = Discriminator32()
+    net_D = Discriminator32().cuda()
     f = net_D(x)
     grad_f = torch.autograd.grad(f.sum(), x)[0]
     grad_norm = torch.norm(torch.flatten(grad_f, start_dim=1), p=2, dim=1)

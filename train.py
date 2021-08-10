@@ -64,6 +64,7 @@ flags.DEFINE_float('lr_G', 2e-4, "Generator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
+flags.DEFINE_float('rescale_step', 10000, "rescale wieght per this step")
 flags.DEFINE_float('cr', 0, "weight for consistency regularization")
 flags.DEFINE_integer('seed', 0, "random seed")
 # conditional
@@ -252,22 +253,21 @@ def train():
                 loss_fake_sum += loss_fake.cpu().item()
                 loss_cr_sum += loss_cr.cpu().item()
 
-            if step % 5000 == 0 and FLAGS.arch.startswith('dcgan'):
-                net_D.rescale_weight(optim_D)
+            if FLAGS.rescale_step > 0 and step % FLAGS.rescale_step == 0:
+                net_D.rescale_weight()
 
-            if FLAGS.arch.startswith('dcgan'):
-                with torch.no_grad():
-                    for i, m in enumerate(net_D.modules()):
-                        if isinstance(m, torch.nn.Conv2d):
-                            w_norm = m.weight.norm(p=2)
-                            b_norm = m.bias.norm(p=2)
-                            writer.add_scalar(f'w_norm/{i}.conv', w_norm, step)
-                            writer.add_scalar(f'b_norm/{i}.conv', b_norm, step)
-                        if isinstance(m, torch.nn.Linear):
-                            w_norm = m.weight.norm(p=2)
-                            b_norm = m.bias.norm(p=2)
-                            writer.add_scalar(f'w_norm/{i}.lin', w_norm, step)
-                            writer.add_scalar(f'b_norm/{i}.lin', b_norm, step)
+            with torch.no_grad():
+                for i, m in enumerate(net_D.modules()):
+                    if isinstance(m, torch.nn.Conv2d):
+                        w_norm = m.weight.norm(p=2)
+                        b_norm = m.bias.norm(p=2)
+                        writer.add_scalar(f'w_norm/{i}.conv', w_norm, step)
+                        writer.add_scalar(f'b_norm/{i}.conv', b_norm, step)
+                    if isinstance(m, torch.nn.Linear):
+                        w_norm = m.weight.norm(p=2)
+                        b_norm = m.bias.norm(p=2)
+                        writer.add_scalar(f'w_norm/{i}.lin', w_norm, step)
+                        writer.add_scalar(f'b_norm/{i}.lin', b_norm, step)
 
             loss = loss_sum / FLAGS.n_dis
             loss_real = loss_real_sum / FLAGS.n_dis

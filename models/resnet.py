@@ -179,9 +179,10 @@ class ReScaleBlock(nn.Module):
             residual_scale = scale_module(
                 module, residual_scale, min_norm, max_norm)
 
+        shortcut_scale = base_scale
         for module in self.shortcut.modules():
             shortcut_scale = scale_module(
-                module, base_scale, min_norm, max_norm)
+                module, shortcut_scale, min_norm, max_norm)
         self.shortcut_scale *= residual_scale / shortcut_scale
 
         return residual_scale
@@ -366,9 +367,9 @@ class ResDiscriminator256(ReScaleModel):
 
 
 if __name__ == '__main__':
-    x = torch.randn(2, 3, 32, 32, requires_grad=True)
+    x = torch.randn(2, 3, 32, 32, requires_grad=True).cuda()
 
-    net_D = ResDiscriminator32()
+    net_D = ResDiscriminator32().cuda()
     f = net_D(x)
     grad_f = torch.autograd.grad(f.sum(), x)[0]
     grad_norm = torch.norm(torch.flatten(grad_f, start_dim=1), p=2, dim=1)
