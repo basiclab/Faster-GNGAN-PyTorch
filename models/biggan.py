@@ -4,6 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .gradnorm import rescale_module
+
 
 sn = partial(torch.nn.utils.spectral_norm, eps=1e-6)
 
@@ -166,32 +168,54 @@ class Generator128(nn.Module):
         return h
 
 
-class OptimizedDisblock(nn.Module):
+class ReScaleBlock(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.shortcut_scale = 1
+
+    @torch.no_grad()
+    def rescale_block(self, base_scale, min_scale=0.7, max_scale=1.0):
+        residual_scale = base_scale
+        for module in self.residual.modules():
+            residual_scale, _ = rescale_module(module, residual_scale)
+
+        shortcut_scale = base_scale
+        for module in self.shortcut.modules():
+            shortcut_scale, _ = rescale_module(module, shortcut_scale)
+        self.shortcut_scale *= residual_scale / shortcut_scale
+
+        return residual_scale
+
+    def forward(self, x):
+        return self.residual(x) + self.shortcut(x) * self.shortcut_scale
+
+
+class OptimizedDisblock(ReScaleBlock):
     def __init__(self, in_channels, out_channels):
         super().__init__()
+        # shortcut
         self.shortcut = nn.Sequential(
             nn.AvgPool2d(2),
             nn.Conv2d(in_channels, out_channels, 1, padding=0))
+        # residual
         self.residual = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, 3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, 3, padding=1),
             nn.AvgPool2d(2))
 
-    def forward(self, x):
-        return self.residual(x) + self.shortcut(x)
 
-
-class DisBlock(nn.Module):
+class DisBlock(ReScaleBlock):
     def __init__(self, in_channels, out_channels, down=False):
         super().__init__()
+        # shortcut
         shortcut = []
         if in_channels != out_channels or down:
             shortcut.append(nn.Conv2d(in_channels, out_channels, 1, 1, 0))
         if down:
             shortcut.append(nn.AvgPool2d(2))
         self.shortcut = nn.Sequential(*shortcut)
-
+        # residual
         residual = [
             nn.ReLU(),
             nn.Conv2d(in_channels, out_channels, 3, 1, 1),
@@ -202,18 +226,39 @@ class DisBlock(nn.Module):
             residual.append(nn.AvgPool2d(2))
         self.residual = nn.Sequential(*residual)
 
-    def forward(self, x):
-        return self.residual(x) + self.shortcut(x)
+
+class ReScaleModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embedding_scale = 1
+
+    def rescale_model(self, min_norm=1.0, max_norm=1.33):
+        base_scale = 1
+        for block in self.model:
+            if isinstance(block, ReScaleBlock):
+                # print(base_scale)
+                base_scale = block.rescale_block(base_scale)
+        linear_scale, _ = rescale_module(self.linear, base_scale)
+        embedding_scale, _ = rescale_module(self.embedding, base_scale)
+        self.embedding_scale *= linear_scale / embedding_scale
+        return linear_scale
+
+    def forward(self, x, y):
+        h = self.model(x).sum(dim=[2, 3])
+        h = (
+            self.linear(h) +
+            (self.embedding(y) * h * self.embedding_scale).sum(
+                dim=1, keepdim=True)
+        )
+        return h
 
 
-class Discriminator32(nn.Module):
+class Discriminator32(ReScaleModel):
     def __init__(self, n_classes=10, ch=64):
         super().__init__()
-        self.fp16 = False
-        # channels_multipler = [2, 2, 2, 2]
-        self.blocks = nn.Sequential(
-            OptimizedDisblock(3, ch * 4),           # 3 x 32 x 32
-            DisBlock(ch * 4, ch * 4, down=True),    # ch*4 x 16 x 16
+        self.model = nn.Sequential(                 # 3 x 32 x 32
+            OptimizedDisblock(3, ch * 4),           # ch*4 x 16 x 16
+            DisBlock(ch * 4, ch * 4, down=True),    # ch*4 x 8 x 8
             DisBlock(ch * 4, ch * 4),               # ch*4 x 8 x 8
             DisBlock(ch * 4, ch * 4),               # ch*4 x 8 x 8
             nn.ReLU(inplace=True),
@@ -223,35 +268,25 @@ class Discriminator32(nn.Module):
         self.embedding = nn.Embedding(n_classes, ch * 4)
         res32_weights_init(self)
 
-    def forward(self, x, y):
-        h = self.blocks(x).sum(dim=[2, 3])
-        h = self.linear(h) + (self.embedding(y) * h).sum(dim=1, keepdim=True)
-        return h
 
-
-class Discriminator128(nn.Module):
+class Discriminator128(ReScaleModel):
     def __init__(self, n_classes=1000, ch=96):
         super().__init__()
         # channels_multipler = [1, 2, 4, 8, 16, 16]
-        self.blocks = nn.Sequential(
-            OptimizedDisblock(3, ch * 1),          # 3 x 128 x 128
+        self.model = nn.Sequential(                # 3 x 128 x 128
+            OptimizedDisblock(3, ch * 1),          # ch*1 x 64 x 64
             Attention(ch, False),                  # ch*1 x 64 x 64
-            DisBlock(ch * 1, ch * 2, down=True),   # ch*1 x 32 x 32
-            DisBlock(ch * 2, ch * 4, down=True),   # ch*2 x 16 x 16
-            DisBlock(ch * 4, ch * 8, down=True),   # ch*4 x 8 x 8
-            DisBlock(ch * 8, ch * 16, down=True),  # ch*8 x 4 x 4
+            DisBlock(ch * 1, ch * 2, down=True),   # ch*2 x 32 x 32
+            DisBlock(ch * 2, ch * 4, down=True),   # ch*4 x 16 x 16
+            DisBlock(ch * 4, ch * 8, down=True),   # ch*8 x 8 x 8
+            DisBlock(ch * 8, ch * 16, down=True),  # ch*16 x 4 x 4
             DisBlock(ch * 16, ch * 16),            # ch*16 x 4 x 4
             nn.ReLU(inplace=True),                 # ch*16 x 4 x 4
         )
 
         self.linear = nn.Linear(ch * 16, 1)
         self.embedding = nn.Embedding(n_classes, ch * 16)
-        # res128_weights_init(self)
-
-    def forward(self, x, y):
-        h = self.blocks(x).sum(dim=[2, 3])
-        h = self.linear(h) + (self.embedding(y) * h).sum(dim=1, keepdim=True)
-        return h
+        res128_weights_init(self)
 
 
 def res32_weights_init(m):
@@ -266,3 +301,60 @@ def res128_weights_init(m):
     for module in m.modules():
         if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
             torch.nn.init.orthogonal_(module.weight)
+
+
+if __name__ == '__main__':
+    Models = [
+        (32, 10, Discriminator32),
+        (128, 1000, Discriminator128),
+    ]
+    for res, n_classes, Model in Models:
+        print("=" * 80)
+        print(Model.__name__)
+        x = torch.randn(2, 3, res, res, requires_grad=True).cuda()
+        y = torch.randint(n_classes, (2,)).cuda()
+        net_D = Model(n_classes).cuda()
+        f = net_D(x, y=y)
+        grad_f = torch.autograd.grad(f.sum(), x)[0]
+        grad_norm = torch.norm(torch.flatten(grad_f, start_dim=1), p=2, dim=1)
+        grad_norm = grad_norm.view(-1, 1)
+        f_hat = f / (grad_norm + torch.abs(f))
+        print('     '
+              f'{"Output":>11s}, {"Raw Output":>11s}, {"Grad Norm":>11s}')
+        print('ORIG '
+              f'{f_hat[0].item():+11.7f}, '
+              f'{f[0].item():+11.7f}, '
+              f'{grad_norm[0].item():+11.7f}')
+
+        for step in range(10):
+            net_D.rescale_model()
+            f_scaled = net_D(x, y=y)
+            grad_f_scaled = torch.autograd.grad(f_scaled.sum(), x)[0]
+            grad_norm_scaled = torch.norm(
+                torch.flatten(grad_f_scaled, start_dim=1), p=2, dim=1)
+            grad_norm_scaled = grad_norm_scaled.view(-1, 1)
+            f_hat_scaled = f_scaled / (grad_norm_scaled + torch.abs(f_scaled))
+
+            alpha1 = f / f_scaled
+            alpha2 = grad_norm / grad_norm_scaled
+            if step < 5:
+                assert torch.allclose(
+                    alpha1, alpha2, rtol=1e-04, atol=1e-06), \
+                    f'{alpha1[0].item():.7f}, {alpha2[0].item():.7f}'
+                assert torch.allclose(
+                    f_hat, f_hat_scaled, rtol=1e-04, atol=1e-06), \
+                    f'{f_hat[0].item():.7f}, {f_hat_scaled[0].item():.7f}'
+            else:
+                if not torch.allclose(alpha1, alpha2, rtol=1e-04, atol=1e-06):
+                    print(f'WARN1 '
+                          f'{alpha1[0].item():+.7f} != {alpha2[0].item():+.7f}')
+                if not torch.allclose(
+                        f_hat, f_hat_scaled, rtol=1e-04, atol=1e-06):
+                    print(f'WARN2 '
+                          f'{f_hat[0].item():+.7f}, '
+                          f'{f_hat_scaled[0].item():+.7f}')
+
+            print('PASS '
+                  f'{f_hat_scaled[0].item():+11.7f}, '
+                  f'{f_scaled[0].item():+11.7f}, '
+                  f'{grad_norm_scaled[0].item():+11.7f}')

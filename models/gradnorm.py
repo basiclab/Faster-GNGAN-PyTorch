@@ -1,6 +1,7 @@
 from functools import partial
 
 import torch
+import torch.nn as nn
 
 
 def normalize_gradient_G(net_D, loss_fn, x, **kwargs):
@@ -49,13 +50,16 @@ def normalize_gradient_D(net_D, x, **kwargs):
 
 
 @torch.no_grad()
-def scale_module(module, base_scale=1., min_norm=1.0, max_norm=1.33):
-    if isinstance(module, (torch.nn.Conv2d, torch.nn.Linear)):
-        weight_scale = module.weight.norm(p=2)
-        weight_scale = torch.clamp(
-            weight_scale, min_norm, max_norm)
-        base_scale = base_scale * weight_scale
-        module.weight.data.div_(weight_scale)
-        module.bias.data.div_(base_scale)
+def rescale_module(module, base_scale=1., min_scale=0.7, max_scale=1.0):
+    if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
+        scale = 1 / module.weight.norm(p=2)
+        scale = torch.clamp(scale, min_scale, max_scale)
+        base_scale = base_scale * scale
+        if hasattr(module, 'weight') and module.weight is not None:
+            module.weight.data.mul_(scale)
+        if hasattr(module, 'bias') and module.bias is not None:
+            module.bias.data.mul_(base_scale)
+    else:
+        scale = 1.
 
-    return base_scale
+    return base_scale, scale

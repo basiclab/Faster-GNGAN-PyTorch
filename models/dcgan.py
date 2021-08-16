@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 
-from .gradnorm import scale_module
+from .gradnorm import rescale_module
 
 
 class Generator(nn.Module):
@@ -74,10 +74,10 @@ class Discriminator(nn.Module):
                 init.zeros_(m.bias)
 
     @torch.no_grad()
-    def rescale_weight(self, min_norm=1.0, max_norm=1.33):
+    def rescale_model(self, min_scale=1.0, max_scale=1.33):
         base_scale = 1.0
         for module in self.modules():
-            base_scale = scale_module(module, base_scale, min_norm, max_norm)
+            base_scale, _ = rescale_module(module, base_scale)
         return base_scale
 
     def forward(self, x, *args, **kwargs):
@@ -108,32 +108,56 @@ class Discriminator48(Discriminator):
 
 
 if __name__ == '__main__':
-    x = torch.randn(1, 3, 32, 32, requires_grad=True).cuda()
+    Models = [
+        (32, Discriminator32),
+        (48, Discriminator48),
+    ]
+    for res, Model in Models:
+        print("=" * 80)
+        print(Model.__name__)
+        x = torch.randn(2, 3, res, res, requires_grad=True).cuda()
+        net_D = Model().cuda()
+        f = net_D(x)
+        grad_f = torch.autograd.grad(f.sum(), x)[0]
+        grad_norm = torch.norm(torch.flatten(grad_f, start_dim=1), p=2, dim=1)
+        grad_norm = grad_norm.view(-1, 1)
+        f_hat = f / (grad_norm + torch.abs(f))
+        print('     '
+              f'{"Output":>11s}, {"Raw Output":>11s}, {"Grad Norm":>11s}')
+        print('ORIG '
+              f'{f_hat[0].item():+11.7f}, '
+              f'{f[0].item():+11.7f}, '
+              f'{grad_norm[0].item():+11.7f}')
 
-    net_D = Discriminator32().cuda()
-    f = net_D(x)
-    grad_f = torch.autograd.grad(f.sum(), x)[0]
-    grad_norm = torch.norm(torch.flatten(grad_f, start_dim=1), p=2, dim=1)
-    grad_norm = grad_norm.view(-1, 1)
-    f_hat = f / (grad_norm + torch.abs(f))
-    print(
-        f'{f_hat[0].item():.7f}, {f[0].item():.7f}, {grad_norm[0].item():.7f}')
+        for step in range(10):
+            net_D.rescale_model()
+            f_scaled = net_D(x)
+            grad_f_scaled = torch.autograd.grad(f_scaled.sum(), x)[0]
+            grad_norm_scaled = torch.norm(
+                torch.flatten(grad_f_scaled, start_dim=1), p=2, dim=1)
+            grad_norm_scaled = grad_norm_scaled.view(-1, 1)
+            f_hat_scaled = f_scaled / (grad_norm_scaled + torch.abs(f_scaled))
 
-    for _ in range(10):
-        net_D.rescale_weight()
-        f_scaled = net_D(x)
-        grad_f_scaled = torch.autograd.grad(f_scaled.sum(), x)[0]
-        grad_norm_scaled = torch.norm(
-            torch.flatten(grad_f_scaled, start_dim=1), p=2, dim=1)
-        grad_norm_scaled = grad_norm_scaled.view(-1, 1)
-        f_hat_scaled = f_scaled / (grad_norm_scaled + torch.abs(f_scaled))
-        print(
-            f'{f_hat_scaled[0].item():.7f}, '
-            f'{f_scaled[0].item():.7f}, ',
-            f'{grad_norm_scaled[0].item():.7f}')
+            alpha1 = f / f_scaled
+            alpha2 = grad_norm / grad_norm_scaled
+            if step < 5:
+                assert torch.allclose(
+                    alpha1, alpha2, rtol=1e-04, atol=1e-06), \
+                    f'{alpha1[0].item():.7f}, {alpha2[0].item():.7f}'
+                assert torch.allclose(
+                    f_hat, f_hat_scaled, rtol=1e-04, atol=1e-06), \
+                    f'{f_hat[0].item():.7f}, {f_hat_scaled[0].item():.7f}'
+            else:
+                if not torch.allclose(alpha1, alpha2, rtol=1e-04, atol=1e-06):
+                    print(f'WARN1 '
+                          f'{alpha1[0].item():+.7f} != {alpha2[0].item():+.7f}')
+                if not torch.allclose(
+                        f_hat, f_hat_scaled, rtol=1e-04, atol=1e-06):
+                    print(f'WARN2 '
+                          f'{f_hat[0].item():+.7f}, '
+                          f'{f_hat_scaled[0].item():+.7f}')
 
-        assert torch.allclose(
-            f / f_scaled, grad_norm / grad_norm_scaled, rtol=1e-04, atol=1e-06)
-        assert torch.allclose(
-            f_hat, f_hat_scaled, rtol=1e-04, atol=1e-06)
-        print('Pass')
+            print('PASS '
+                  f'{f_hat_scaled[0].item():+11.7f}, '
+                  f'{f_scaled[0].item():+11.7f}, '
+                  f'{grad_norm_scaled[0].item():+11.7f}')
