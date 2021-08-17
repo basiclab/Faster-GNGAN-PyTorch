@@ -64,7 +64,7 @@ flags.DEFINE_float('lr_G', 2e-4, "Generator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
-flags.DEFINE_float('rescale_step', 10000, "rescale wieght per this step")
+flags.DEFINE_float('rescale_step', -1, "rescale wieght per this step")
 flags.DEFINE_float('cr', 0, "weight for consistency regularization")
 flags.DEFINE_integer('seed', 0, "random seed")
 # conditional
@@ -254,7 +254,7 @@ def train():
                 loss_cr_sum += loss_cr.cpu().item()
 
             if FLAGS.rescale_step > 0 and step % FLAGS.rescale_step == 0:
-                net_D.rescale_weight()
+                net_D.rescale_model()
 
             with torch.no_grad():
                 for i, m in enumerate(net_D.modules()):
