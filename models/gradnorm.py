@@ -49,17 +49,40 @@ def normalize_gradient_D(net_D, x, **kwargs):
     return f_hat
 
 
-@torch.no_grad()
-def rescale_module(module, base_scale=1., min_scale=0.7, max_scale=1.0):
-    if isinstance(module, (nn.Conv2d, nn.Linear, nn.Embedding)):
-        scale = 1 / module.weight.norm(p=2)
-        scale = torch.clamp(scale, min_scale, max_scale)
-        base_scale = base_scale * scale
-        if hasattr(module, 'weight') and module.weight is not None:
-            module.weight.data.mul_(scale)
-        if hasattr(module, 'bias') and module.bias is not None:
-            module.bias.data.mul_(base_scale)
-    else:
-        scale = 1.
+class Rescalable(nn.Module):
+    def __init__(self, module: nn.Module):
+        super().__init__()
+        self.module = module
+        assert 'weight' in module._parameters
 
-    return base_scale, scale
+    def init_module_scale(self):
+        if 'weight' in self.module._parameters:
+            self.init_param_scale('weight')
+        if 'bias' in self.module._parameters:
+            self.init_param_scale('bias')
+
+    def init_param_scale(self, name):
+        params = self.module._parameters[name]
+        self.module.register_parameter(f"{name}_raw", params)
+        self.module.register_buffer(f'{name}_scale', torch.ones(()))
+        self.module.register_buffer(f'{name}_norm', params.data.norm(p=2))
+        delattr(self.module, name)
+        setattr(self.module, name, params.data)
+
+    @torch.no_grad()
+    def rescale(self, base_scale=1.):
+        if 'weight_raw' in self.module._parameters:
+            self.module.weight_scale = self.module.weight_norm / (
+                self.module.weight_raw.norm(p=2) + 1e-12)
+            base_scale = base_scale * self.module.weight_scale
+        if 'bias_raw' in self.module._parameters:
+            self.module.bias_scale = base_scale
+        return base_scale
+
+    def forward(self, *args, **kwargs):
+        for name in ['weight', 'bias']:
+            if f"{name}_raw" in self.module._parameters:
+                param = self.module._parameters[f"{name}_raw"]
+                scale = self.module._buffers[f'{name}_scale']
+                setattr(self.module, name, param * scale)
+        return self.module(*args, **kwargs)

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 
-from .gradnorm import rescale_module
+from .gradnorm import Rescalable
 
 
 class Generator(nn.Module):
@@ -46,38 +46,47 @@ class Discriminator(nn.Module):
 
         self.main = nn.Sequential(
             # M
-            nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1),
+            Rescalable(
+                nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)),
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
+            Rescalable(
+                nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1)),
             nn.LeakyReLU(0.1, inplace=True),
             # M / 2
-            nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+            Rescalable(
+                nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1)),
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
+            Rescalable(
+                nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1)),
             nn.LeakyReLU(0.1, inplace=True),
             # M / 4
-            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+            Rescalable(
+                nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)),
             nn.LeakyReLU(0.1, inplace=True),
-            nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),
+            Rescalable(
+                nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1)),
             nn.LeakyReLU(0.1, inplace=True),
             # M / 8
-            nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
+            Rescalable(
+                nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1)),
             nn.LeakyReLU(0.1, inplace=True))
 
-        self.linear = nn.Linear(M // 8 * M // 8 * 512, 1)
+        self.linear = Rescalable(nn.Linear(M // 8 * M // 8 * 512, 1))
         self.initialize()
 
     def initialize(self):
         for m in self.modules():
-            if isinstance(m, (nn.Conv2d, nn.Linear)):
-                init.normal_(m.weight, std=0.02)
-                init.zeros_(m.bias)
+            if isinstance(m, Rescalable):
+                init.normal_(m.module.weight, std=0.02)
+                init.zeros_(m.module.bias)
+                m.init_module_scale()
 
     @torch.no_grad()
     def rescale_model(self, min_scale=1.0, max_scale=1.33):
         base_scale = 1.0
         for module in self.modules():
-            base_scale, _ = rescale_module(module, base_scale)
+            if isinstance(module, Rescalable):
+                base_scale = module.rescale(base_scale)
         return base_scale
 
     def forward(self, x, *args, **kwargs):
@@ -108,10 +117,20 @@ class Discriminator48(Discriminator):
 
 
 if __name__ == '__main__':
+    import random
+    import numpy as np
+
+    seed = 10
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+
     Models = [
         (32, Discriminator32),
         (48, Discriminator48),
     ]
+
     for res, Model in Models:
         print("=" * 80)
         print(Model.__name__)
@@ -149,8 +168,9 @@ if __name__ == '__main__':
                     f'{f_hat[0].item():.7f}, {f_hat_scaled[0].item():.7f}'
             else:
                 if not torch.allclose(alpha1, alpha2, rtol=1e-04, atol=1e-06):
-                    print(f'WARN1 '
-                          f'{alpha1[0].item():+.7f} != {alpha2[0].item():+.7f}')
+                    print(
+                        f'WARN1 '
+                        f'{alpha1[0].item():+.7f} != {alpha2[0].item():+.7f}')
                 if not torch.allclose(
                         f_hat, f_hat_scaled, rtol=1e-04, atol=1e-06):
                     print(f'WARN2 '

@@ -14,7 +14,7 @@ from pytorch_gan_metrics import get_inception_score_and_fid
 from datasets import get_dataset
 from losses import HingeLoss, BCEWithLogits, Wasserstein
 from models import resnet, dcgan, biggan
-from models.gradnorm import normalize_gradient_D, normalize_gradient_G
+from models.gradnorm import normalize_gradient_D, normalize_gradient_G, Rescalable
 from utils import ema, save_images, infiniteloop, set_seed, module_no_grad
 from optim import Adam
 
@@ -64,8 +64,8 @@ flags.DEFINE_float('lr_G', 2e-4, "Generator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
-flags.DEFINE_float('rescale_step', -1, "rescale wieght per this step")
 flags.DEFINE_float('cr', 0, "weight for consistency regularization")
+flags.DEFINE_bool('rescale', False, 'rescale output of each layer')
 flags.DEFINE_integer('seed', 0, "random seed")
 # conditional
 flags.DEFINE_integer('n_classes', 1, 'the number of classes in dataset')
@@ -139,6 +139,15 @@ def consistency_loss(net_D, real, y_real, pred_real,
     return loss
 
 
+class ScaleHook:
+    def __init__(self, name):
+        self.name = name
+
+    def __call__(self, module, inputs, outputs):
+        self.norm = torch.norm(
+            torch.flatten(outputs.detach(), start_dim=1), dim=1).mean()
+
+
 def train():
     dataset = get_dataset(FLAGS.dataset)
     dataloader = torch.utils.data.DataLoader(
@@ -178,6 +187,13 @@ def train():
     for param in net_G.parameters():
         G_size += param.data.nelement()
     print('D params: %d, G params: %d' % (D_size, G_size))
+
+    hooks = []
+    for name, module in net_D.named_modules():
+        if isinstance(module, Rescalable):
+            hook = ScaleHook(name)
+            module.register_forward_hook(hook)
+            hooks.append(hook)
 
     writer = SummaryWriter(FLAGS.logdir)
     if FLAGS.resume:
@@ -223,6 +239,9 @@ def train():
             y = iter(torch.split(y, FLAGS.batch_size_D))
             # Discriminator
             for _ in range(FLAGS.n_dis):
+                if FLAGS.rescale:
+                    net_D.rescale_model()
+
                 optim_D.zero_grad()
                 x_real, y_real = next(x).to(device), next(y).to(device)
 
@@ -253,21 +272,8 @@ def train():
                 loss_fake_sum += loss_fake.cpu().item()
                 loss_cr_sum += loss_cr.cpu().item()
 
-            if FLAGS.rescale_step > 0 and step % FLAGS.rescale_step == 0:
-                net_D.rescale_model()
-
-            with torch.no_grad():
-                for i, m in enumerate(net_D.modules()):
-                    if isinstance(m, torch.nn.Conv2d):
-                        w_norm = m.weight.norm(p=2)
-                        b_norm = m.bias.norm(p=2)
-                        writer.add_scalar(f'w_norm/{i}.conv', w_norm, step)
-                        writer.add_scalar(f'b_norm/{i}.conv', b_norm, step)
-                    if isinstance(m, torch.nn.Linear):
-                        w_norm = m.weight.norm(p=2)
-                        b_norm = m.bias.norm(p=2)
-                        writer.add_scalar(f'w_norm/{i}.lin', w_norm, step)
-                        writer.add_scalar(f'b_norm/{i}.lin', b_norm, step)
+            for hook in hooks:
+                writer.add_scalar(f'feature_norm/{hook.name}', hook.norm, step)
 
             loss = loss_sum / FLAGS.n_dis
             loss_real = loss_real_sum / FLAGS.n_dis

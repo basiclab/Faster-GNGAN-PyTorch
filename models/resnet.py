@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 
-from .gradnorm import rescale_module
+from .gradnorm import Rescalable
 
 
 class GenBlock(nn.Module):
@@ -177,15 +177,17 @@ class ReScaleBlock(nn.Module):
         self.shortcut_scale = 1
 
     @torch.no_grad()
-    def rescale_block(self, base_scale, min_scale=0.7, max_scale=1.0):
+    def rescale_block(self, base_scale):
         residual_scale = base_scale
         for module in self.residual.modules():
-            residual_scale, _ = rescale_module(module, residual_scale)
+            if isinstance(module, Rescalable):
+                residual_scale = module.rescale(residual_scale)
 
         shortcut_scale = base_scale
         for module in self.shortcut.modules():
-            shortcut_scale, _ = rescale_module(module, shortcut_scale)
-        self.shortcut_scale *= residual_scale / shortcut_scale
+            if isinstance(module, Rescalable):
+                shortcut_scale = module.rescale(shortcut_scale)
+        self.shortcut_scale = residual_scale / shortcut_scale
 
         return residual_scale
 
@@ -199,21 +201,22 @@ class OptimizedDisblock(ReScaleBlock):
         # shortcut
         self.shortcut = nn.Sequential(
             nn.AvgPool2d(2),
-            nn.Conv2d(in_channels, out_channels, 1, 1, 0))
+            Rescalable(nn.Conv2d(in_channels, out_channels, 1, 1, 0)))
         # residual
         self.residual = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, 3, 1, 1),
+            Rescalable(nn.Conv2d(in_channels, out_channels, 3, 1, 1)),
             nn.ReLU(True),
-            nn.Conv2d(out_channels, out_channels, 3, 1, 1),
+            Rescalable(nn.Conv2d(out_channels, out_channels, 3, 1, 1)),
             nn.AvgPool2d(2))
         # initialize weight
         self.initialize()
 
     def initialize(self):
         for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                init.kaiming_normal_(m.weight)
-                init.zeros_(m.bias)
+            if isinstance(m, Rescalable):
+                init.kaiming_normal_(m.module.weight)
+                init.zeros_(m.module.bias)
+                m.init_module_scale()
 
 
 class DisBlock(ReScaleBlock):
@@ -222,16 +225,17 @@ class DisBlock(ReScaleBlock):
         # shortcut
         shortcut = []
         if in_channels != out_channels or down:
-            shortcut.append(nn.Conv2d(in_channels, out_channels, 1, 1, 0))
+            shortcut.append(
+                Rescalable(nn.Conv2d(in_channels, out_channels, 1, 1, 0)))
         if down:
             shortcut.append(nn.AvgPool2d(2))
         self.shortcut = nn.Sequential(*shortcut)
         # residual
         residual = [
             nn.ReLU(),
-            nn.Conv2d(in_channels, out_channels, 3, 1, 1),
+            Rescalable(nn.Conv2d(in_channels, out_channels, 3, 1, 1)),
             nn.ReLU(True),
-            nn.Conv2d(out_channels, out_channels, 3, 1, 1),
+            Rescalable(nn.Conv2d(out_channels, out_channels, 3, 1, 1)),
         ]
         if down:
             residual.append(nn.AvgPool2d(2))
@@ -241,25 +245,31 @@ class DisBlock(ReScaleBlock):
 
     def initialize(self):
         for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                init.kaiming_normal_(m.weight)
-                init.zeros_(m.bias)
+            if isinstance(m, Rescalable):
+                init.kaiming_normal_(m.module.weight)
+                init.zeros_(m.module.bias)
+                m.init_module_scale()
 
 
 class ReScaleModel(nn.Module):
-    def rescale_model(self, min_scale=0.7, max_scale=1.0):
+    def rescale_model(self):
         base_scale = 1
         for block in self.model:
             if isinstance(block, ReScaleBlock):
                 base_scale = block.rescale_block(base_scale)
-        base_scale, _ = rescale_module(self.linear, base_scale)
+        base_scale = self.linear.rescale(base_scale)
         return base_scale
 
-    def forward(self, x):
+    def forward(self, x, *args, **kwargs):
         x = self.model(x)
         x = torch.flatten(x, start_dim=1)
         x = self.linear(x)
         return x
+
+    def initialize(self):
+        init.kaiming_normal_(self.linear.module.weight)
+        init.zeros_(self.linear.module.bias)
+        self.linear.init_module_scale()
 
 
 class ResDiscriminator32(ReScaleModel):
@@ -272,13 +282,9 @@ class ResDiscriminator32(ReScaleModel):
             DisBlock(128, 128),
             nn.ReLU(True),
             nn.AdaptiveAvgPool2d((1, 1)))
-        self.linear = nn.Linear(128, 1)
+        self.linear = Rescalable(nn.Linear(128, 1))
         # initialize weight
         self.initialize()
-
-    def initialize(self):
-        init.kaiming_normal_(self.linear.weight)
-        init.zeros_(self.linear.bias)
 
 
 class ResDiscriminator48(ReScaleModel):
@@ -291,13 +297,9 @@ class ResDiscriminator48(ReScaleModel):
             DisBlock(256, 512, down=True),
             nn.ReLU(True),
             nn.AdaptiveAvgPool2d((1, 1)))
-        self.linear = nn.Linear(512, 1)
+        self.linear = Rescalable(nn.Linear(512, 1))
         # initialize weight
         self.initialize()
-
-    def initialize(self):
-        init.kaiming_normal_(self.linear.weight)
-        init.zeros_(self.linear.bias)
 
 
 class ResDiscriminator128(ReScaleModel):
@@ -312,13 +314,9 @@ class ResDiscriminator128(ReScaleModel):
             DisBlock(1024, 1024),
             nn.ReLU(True),
             nn.AdaptiveAvgPool2d((1, 1)))
-        self.linear = nn.Linear(1024, 1)
+        self.linear = Rescalable(nn.Linear(1024, 1))
         # initialize weight
         self.initialize()
-
-    def initialize(self):
-        init.kaiming_normal_(self.linear.weight)
-        init.zeros_(self.linear.bias)
 
 
 class ResDiscriminator256(ReScaleModel):
@@ -334,13 +332,9 @@ class ResDiscriminator256(ReScaleModel):
             DisBlock(1024, 1024),
             nn.ReLU(True),
             nn.AdaptiveAvgPool2d((1, 1)))
-        self.linear = nn.Linear(1024, 1)
+        self.linear = Rescalable(nn.Linear(1024, 1))
         # initialize weight
         self.initialize()
-
-    def initialize(self):
-        init.kaiming_normal_(self.linear.weight)
-        init.zeros_(self.linear.bias)
 
 
 if __name__ == '__main__':
@@ -387,8 +381,9 @@ if __name__ == '__main__':
                     f'{f_hat[0].item():.7f}, {f_hat_scaled[0].item():.7f}'
             else:
                 if not torch.allclose(alpha1, alpha2, rtol=1e-04, atol=1e-06):
-                    print(f'WARN1 '
-                          f'{alpha1[0].item():+.7f} != {alpha2[0].item():+.7f}')
+                    print(
+                        f'WARN1 '
+                        f'{alpha1[0].item():+.7f} != {alpha2[0].item():+.7f}')
                 if not torch.allclose(
                         f_hat, f_hat_scaled, rtol=1e-04, atol=1e-06):
                     print(f'WARN2 '
