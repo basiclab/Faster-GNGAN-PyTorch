@@ -12,16 +12,16 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.multiprocessing import Process
 from torchvision.utils import make_grid, save_image
 from tqdm import trange, tqdm
+from pytorch_gan_metrics import (
+    get_inception_score_and_fid_from_directory,
+    get_inception_score_and_fid)
 
 from datasets import get_dataset
 from losses import HingeLoss
 from models import resnet
-from models.gradnorm import normalize_gradient_D, normalize_gradient_G
-from utils import ema, module_no_grad, set_seed
+from models.gradnorm import normalize_gradient_D, normalize_gradient_G, Rescalable
+from utils import ema, infiniteloop, set_seed, module_no_grad
 from optim import Adam
-from pytorch_gan_metrics import (
-    get_inception_score_and_fid_from_directory,
-    get_inception_score_and_fid)
 
 
 net_G_models = {
@@ -61,6 +61,7 @@ flags.DEFINE_float('lr_G', 2e-4, "Generator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
+flags.DEFINE_bool('rescale', False, 'rescale output of each layer')
 flags.DEFINE_integer('seed', 0, "random seed")
 # ema
 flags.DEFINE_float('ema_decay', 0.9999, "ema decay rate")
@@ -82,8 +83,8 @@ def image_generator(net_G):
     world_size = dist.get_world_size()
     local_batch_size = FLAGS.batch_size_G // world_size
     with torch.no_grad():
-        for idx in range(0, FLAGS.num_images, FLAGS.batch_size_G * 2):
-            z = torch.randn(local_batch_size * 2, FLAGS.z_dim).to(rank)
+        for idx in range(0, FLAGS.num_images, FLAGS.batch_size_G):
+            z = torch.randn(local_batch_size, FLAGS.z_dim).to(rank)
             fake = (net_G(z) + 1) / 2
             fake_list = [torch.empty_like(fake) for _ in range(world_size)]
             dist.all_gather(fake_list, fake)
@@ -166,13 +167,13 @@ def evaluate(net_G):
     return (IS, IS_std), FID
 
 
-def infiniteloop(dataloader, sampler, step=0):
-    epoch = step // len(dataloader)
-    while True:
-        sampler.set_epoch(epoch)
-        for x, y in enumerate(dataloader):
-            yield x, y
-        epoch += 1
+class ScaleHook:
+    def __init__(self, name):
+        self.name = name
+
+    def __call__(self, module, inputs, outputs):
+        self.norm = torch.norm(
+            torch.flatten(outputs.detach(), start_dim=1), dim=1).mean()
 
 
 def train(rank, world_size):
@@ -217,6 +218,13 @@ def train(rank, world_size):
         for param in net_G.parameters():
             G_size += param.data.nelement()
         print('D params: %d, G params: %d' % (D_size, G_size))
+
+    hooks = []
+    for name, module in net_D.named_modules():
+        if isinstance(module, Rescalable):
+            hook = ScaleHook(name)
+            module.register_forward_hook(hook)
+            hooks.append(hook)
 
     if FLAGS.resume:
         ckpt = torch.load(
@@ -271,6 +279,9 @@ def train(rank, world_size):
             x = iter(torch.split(x, local_batch_size_D))
             # Discriminator
             for _ in range(FLAGS.n_dis):
+                if FLAGS.rescale:
+                    net_D.module.rescale_model()
+
                 optim_D.zero_grad()
                 for _ in range(FLAGS.accumulation):
                     real = next(x).to(device)
@@ -311,7 +322,7 @@ def train(rank, world_size):
             with module_no_grad(net_D):
                 for _ in range(FLAGS.accumulation):
                     z = torch.randn(
-                        local_batch_size_G * 2, FLAGS.z_dim, device=device)
+                        local_batch_size_G, FLAGS.z_dim, device=device)
                     fake = net_G(z)
                     pred_fake, h = normalize_gradient_G(net_D, loss_fn, fake)
                     loss = pred_fake.mean() / FLAGS.accumulation

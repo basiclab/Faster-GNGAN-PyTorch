@@ -8,5 +8,5 @@ RUN pip3 install absl-py \
     pytorch-gan-metrics==0.3.2 \
     tensorboardX
 
-RUN mkdir /workspace/gngan
-WORKDIR /workspace/gngan
+RUN mkdir /gngan
+WORKDIR /gngan

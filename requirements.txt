@@ -2,11 +2,8 @@ absl-py
 h5py
 lmdb
 tqdm
-numpy==1.19.5
-scipy==1.5.4
-pytorch-gan-metrics==0.2.0
-tensorboard==2.4.1
-tensorboardX==2.1
-tensorflow==2.4.0
-torch==1.8.1
-torchvision==0.9.1
+pytorch-gan-metrics
+tensorboard
+tensorboardX
+torch==1.9.1
+torchvision==0.10.1

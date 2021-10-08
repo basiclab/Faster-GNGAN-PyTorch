@@ -18,10 +18,14 @@ def save_images(images, output_dir, verbose=False):
         save_image(image, os.path.join(output_dir, '%d.png' % i))
 
 
-def infiniteloop(dataloader):
+def infiniteloop(dataloader, sampler=None, step=0):
+    epoch = step // len(dataloader)
     while True:
+        if smapler is not None:
+            sampler.set_epoch(epoch)
         for x, y in iter(dataloader):
             yield x, y
+        epoch += 1
 
 
 def set_seed(seed):
