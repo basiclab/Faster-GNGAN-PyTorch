@@ -221,12 +221,12 @@ def train(rank, world_size):
             G_size += param.data.nelement()
         print('D params: %d, G params: %d' % (D_size, G_size))
 
-    # hooks = []
-    # for name, module in net_D.named_modules():
-    #     if isinstance(module, Rescalable):
-    #         hook = ScaleHook(name)
-    #         module.register_forward_hook(hook)
-    #         hooks.append(hook)
+    hooks = []
+    for name, module in net_D.named_modules():
+        if isinstance(module, Rescalable):
+            hook = ScaleHook(name)
+            module.register_forward_hook(hook)
+            hooks.append(hook)
 
     if FLAGS.resume:
         ckpt = torch.load(
@@ -281,8 +281,8 @@ def train(rank, world_size):
             x = iter(torch.split(x, local_batch_size_D))
             # Discriminator
             for _ in range(FLAGS.n_dis):
-                # if FLAGS.rescale:
-                #     net_D.module.rescale_model()
+                if FLAGS.rescale:
+                    net_D.module.rescale_model()
 
                 optim_D.zero_grad()
                 for _ in range(FLAGS.accumulation):
@@ -293,7 +293,6 @@ def train(rank, world_size):
                     with torch.no_grad():
                         fake = net_G(z).detach()
                     real_fake = torch.cat([real, fake], dim=0)
-                    print(real_fake.shape)
                     pred = normalize_gradient_D(net_D, real_fake)
                     pred_real, pred_fake = torch.split(
                         pred, [real.shape[0], fake.shape[0]])
@@ -315,9 +314,9 @@ def train(rank, world_size):
                 writer.add_scalar('loss', loss, step)
                 writer.add_scalar('loss_real', loss_real, step)
                 writer.add_scalar('loss_fake', loss_fake, step)
-                # for hook in hooks:
-                #     writer.add_scalar(
-                #         f'feature_norm/{hook.name}', hook.norm, step)
+                for hook in hooks:
+                    writer.add_scalar(
+                        f'feature_norm/{hook.name}', hook.norm, step)
 
                 pbar.set_postfix(
                     loss_real='%.3f' % loss_real,
@@ -329,7 +328,6 @@ def train(rank, world_size):
                 for _ in range(FLAGS.accumulation):
                     z = torch.randn(
                         local_batch_size_G, FLAGS.z_dim, device=device)
-                    print(z.shape)
                     fake = net_G(z)
                     pred_fake, h = normalize_gradient_G(net_D, loss_fn, fake)
                     loss = pred_fake.mean() / FLAGS.accumulation
