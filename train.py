@@ -14,7 +14,8 @@ from pytorch_gan_metrics import get_inception_score_and_fid
 from datasets import get_dataset
 from losses import HingeLoss, BCEWithLogits, Wasserstein
 from models import resnet, dcgan, biggan
-from models.gradnorm import normalize_gradient_D, normalize_gradient_G, Rescalable
+from models.gradnorm import (
+    normalize_gradient_D, normalize_gradient_G, Rescalable)
 from utils import ema, save_images, infiniteloop, set_seed, module_no_grad
 from optim import Adam
 
@@ -272,9 +273,6 @@ def train():
                 loss_fake_sum += loss_fake.cpu().item()
                 loss_cr_sum += loss_cr.cpu().item()
 
-            for hook in hooks:
-                writer.add_scalar(f'feature_norm/{hook.name}', hook.norm, step)
-
             loss = loss_sum / FLAGS.n_dis
             loss_real = loss_real_sum / FLAGS.n_dis
             loss_fake = loss_fake_sum / FLAGS.n_dis
@@ -284,6 +282,9 @@ def train():
             writer.add_scalar('loss_real', loss_real, step)
             writer.add_scalar('loss_fake', loss_fake, step)
             writer.add_scalar('loss_cr', loss_cr, step)
+
+            for hook in hooks:
+                writer.add_scalar(f'feature_norm/{hook.name}', hook.norm, step)
 
             pbar.set_postfix(
                 loss_real='%.3f' % loss_real,

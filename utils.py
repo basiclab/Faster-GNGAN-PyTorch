@@ -21,7 +21,7 @@ def save_images(images, output_dir, verbose=False):
 def infiniteloop(dataloader, sampler=None, step=0):
     epoch = step // len(dataloader)
     while True:
-        if smapler is not None:
+        if sampler is not None:
             sampler.set_epoch(epoch)
         for x, y in iter(dataloader):
             yield x, y
