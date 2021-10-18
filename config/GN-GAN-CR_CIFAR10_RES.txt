@@ -21,5 +21,6 @@
 --eval_step=5000
 --save_step=20000
 --num_images=50000
+--best=orig
 --fid_stats=./stats/cifar10.train.npz
 --logdir=./logs/GN-GAN-CR_CIFAR10_RES_0

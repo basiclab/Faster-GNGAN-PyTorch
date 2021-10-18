@@ -1,6 +1,5 @@
 import os
 import json
-import math
 
 import torch
 import torch.optim as optim
@@ -57,13 +56,13 @@ flags.DEFINE_enum('arch', 'resnet.32', net_G_models.keys(), "architecture")
 flags.DEFINE_enum('loss', 'hinge', loss_fns.keys(), "loss function")
 flags.DEFINE_integer('total_steps', 200000, "total number of training steps")
 flags.DEFINE_integer('lr_decay_start', 0, 'apply linearly decay to lr')
-flags.DEFINE_integer('batch_size_D', 64, "batch size")
-flags.DEFINE_integer('batch_size_G', 128, "batch size")
-flags.DEFINE_integer('num_workers', 8, "dataloader workers")
-flags.DEFINE_float('lr_D', 4e-4, "Discriminator learning rate")
-flags.DEFINE_float('lr_G', 2e-4, "Generator learning rate")
+flags.DEFINE_integer('batch_size_D', 64, "batch size for each of fake, real")
+flags.DEFINE_integer('batch_size_G', 128, "batch size for generator")
+flags.DEFINE_integer('num_workers', 8, "# workers in dataloader")
+flags.DEFINE_float('lr_D', 4e-4, "discriminator learning rate")
+flags.DEFINE_float('lr_G', 2e-4, "generator learning rate")
 flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
-flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
+flags.DEFINE_integer('n_dis', 5, "update generator per this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
 flags.DEFINE_float('cr', 0, "weight for consistency regularization")
 flags.DEFINE_bool('rescale', False, 'rescale output of each layer')
@@ -74,12 +73,13 @@ flags.DEFINE_integer('n_classes', 1, 'the number of classes in dataset')
 flags.DEFINE_float('ema_decay', 0.9999, "ema decay rate")
 flags.DEFINE_integer('ema_start', 0, "start step for ema")
 # logging
-flags.DEFINE_integer('sample_step', 500, "sample image every this steps")
+flags.DEFINE_integer('sample_step', 500, "sample image per this steps")
 flags.DEFINE_integer('sample_size', 64, "sampling size of images")
-flags.DEFINE_integer('eval_step', 5000, "evaluate FID and Inception Score")
-flags.DEFINE_integer('save_step', 20000, "save model every this step")
+flags.DEFINE_integer('eval_step', 5000, "evaluate model per n steps")
+flags.DEFINE_integer('save_step', 20000, "save checkpoint per n steps")
 flags.DEFINE_integer('num_images', 50000, '# images for evaluation')
-flags.DEFINE_string('fid_stats', './stats/cifar10.train.npz', 'FID cache')
+flags.DEFINE_enum('best', 'orig', ['ema', 'orig'], 'according to which FID')
+flags.DEFINE_string('fid_stats', './stats/cifar10.train.npz', 'FID statistics')
 flags.DEFINE_string('logdir', './logs/GN-GAN_CIFAR10_RES_0', 'log folder')
 
 
@@ -103,7 +103,10 @@ def generate_images(net_G):
 def eval_save():
     net_G = net_G_models[FLAGS.arch](FLAGS.z_dim, FLAGS.n_classes).to(device)
     ckpt = torch.load(os.path.join(FLAGS.logdir, 'best_model.pt'))
-    net_G.load_state_dict(ckpt['net_G'])
+    if FLAGS.best == 'orig':
+        net_G.load_state_dict(ckpt['net_G'])
+    else:
+        net_G.load_state_dict(ckpt['ema_G'])
 
     images = generate_images(net_G=net_G)
     if FLAGS.eval:
@@ -279,9 +282,9 @@ def train():
             loss_cr = loss_cr_sum / FLAGS.n_dis
 
             writer.add_scalar('loss', loss, step)
-            writer.add_scalar('loss_real', loss_real, step)
-            writer.add_scalar('loss_fake', loss_fake, step)
-            writer.add_scalar('loss_cr', loss_cr, step)
+            writer.add_scalar('loss/real', loss_real, step)
+            writer.add_scalar('loss/fake', loss_fake, step)
+            writer.add_scalar('loss/cr', loss_cr, step)
 
             for hook in hooks:
                 writer.add_scalar(f'feature_norm/{hook.name}', hook.norm, step)
@@ -323,21 +326,28 @@ def train():
                 grid_ema = (make_grid(fake_ema) + 1) / 2
                 writer.add_image('sample_ema', grid_ema, step)
                 writer.add_image('sample', grid_net, step)
+                if FLAGS.best == 'orig':
+                    grid = grid_net
+                else:
+                    grid = grid_ema
                 save_image(
-                    grid_ema,
+                    grid,
                     os.path.join(FLAGS.logdir, 'sample', '%d.png' % step))
 
             # evaluate IS, FID and save model
             if step == 1 or step % FLAGS.eval_step == 0:
                 (IS, IS_std), FID = evaluate(net_G)
                 (IS_ema, IS_std_ema), FID_ema = evaluate(ema_G)
-                if not math.isnan(FID) and not math.isnan(best_FID):
+                if FLAGS.best == 'orig':
                     save_as_best = (FID < best_FID)
+                    if save_as_best:
+                        best_IS = IS
+                        best_FID = FID
                 else:
-                    save_as_best = (IS > best_IS)
-                if save_as_best:
-                    best_IS = IS
-                    best_FID = FID
+                    save_as_best = (FID_ema < best_FID)
+                    if save_as_best:
+                        best_IS = IS_ema
+                        best_FID = FID_ema
                 ckpt = {
                     'net_G': net_G.state_dict(),
                     'net_D': net_D.state_dict(),
@@ -361,11 +371,13 @@ def train():
                 torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
                 metrics = {
                     'IS': IS,
-                    'IS_std': IS_std,
+                    'IS/std': IS_std,
+                    'IS/EMA': IS_ema,
+                    'IS/EMA/std': IS_std_ema,
+                    'IS/Best': best_IS,
                     'FID': FID,
-                    'IS_EMA': IS_ema,
-                    'IS_std_EMA': IS_std_ema,
-                    'FID_EMA': FID_ema,
+                    'FID/EMA': FID_ema,
+                    'FID/best': best_FID,
                 }
                 for name, value in metrics.items():
                     writer.add_scalar(name, value, step)
@@ -377,9 +389,9 @@ def train():
                 pbar.write(
                     f"{step:{k}d}/{FLAGS.total_steps} "
                     f"IS: {IS:6.3f}({IS_std:.3f}), "
+                    f"IS/EMA: {IS_ema:6.3f}({IS_std_ema:.3f}), "
                     f"FID: {FID:.3f}, "
-                    f"IS_EMA: {IS_ema:6.3f}({IS_std_ema:.3f}), "
-                    f"FID_EMA: {FID_ema:.3f}")
+                    f"FID/EMA: {FID_ema:.3f}")
     writer.close()
 
 

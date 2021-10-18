@@ -23,5 +23,6 @@
 --eval_step=5000
 --save_step=20000
 --num_images=50000
+--best=ema
 --fid_stats=./stats/cifar10.train.npz
 --logdir=./logs/GN-GAN_CIFAR10_BIGGAN_0
