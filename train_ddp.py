@@ -2,7 +2,6 @@ import os
 import json
 import math
 import datetime
-from shutil import copyfile
 
 import torch
 import torch.distributed as dist
@@ -312,8 +311,8 @@ def train(rank, world_size):
 
             if rank == 0:
                 writer.add_scalar('loss', loss, step)
-                writer.add_scalar('loss_real', loss_real, step)
-                writer.add_scalar('loss_fake', loss_fake, step)
+                writer.add_scalar('loss/real', loss_real, step)
+                writer.add_scalar('loss/fake', loss_fake, step)
                 for hook in hooks:
                     writer.add_scalar(
                         f'feature_norm/{hook.name}', hook.norm, step)
@@ -367,23 +366,6 @@ def train(rank, world_size):
 
             # evaluate IS, FID and save latest model
             if step == 1 or step % FLAGS.eval_step == 0:
-                if rank == 0:
-                    ckpt = {
-                        'net_G': net_G.state_dict(),
-                        'net_D': net_D.state_dict(),
-                        'ema_G': ema_G.state_dict(),
-                        'optim_G': optim_G.state_dict(),
-                        'optim_D': optim_D.state_dict(),
-                        'fixed_z': fixed_z,
-                        'best_IS': best_IS,
-                        'best_FID': best_FID,
-                        'step': step,
-                    }
-                    torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
-                    if step == 1 or step % FLAGS.save_step == 0:
-                        torch.save(
-                            ckpt, os.path.join(FLAGS.logdir, '%06d.pt' % step))
-
                 (IS, IS_std), FID = evaluate(net_G)
                 (IS_ema, IS_std_ema), FID_ema = evaluate(ema_G)
 
@@ -395,16 +377,33 @@ def train(rank, world_size):
                     if save_as_best:
                         best_IS = IS_ema
                         best_FID = FID_ema
-                        copyfile(
-                            os.path.join(FLAGS.logdir, 'model.pt'),
-                            os.path.join(FLAGS.logdir, 'best_model.pt'))
+                    ckpt = {
+                        'net_G': net_G.state_dict(),
+                        'net_D': net_D.state_dict(),
+                        'ema_G': ema_G.state_dict(),
+                        'optim_G': optim_G.state_dict(),
+                        'optim_D': optim_D.state_dict(),
+                        'fixed_z': fixed_z,
+                        'best_IS': best_IS,
+                        'best_FID': best_FID,
+                        'step': step,
+                    }
+                    if step == 1 or step % FLAGS.save_step == 0:
+                        torch.save(
+                            ckpt, os.path.join(FLAGS.logdir, '%06d.pt' % step))
+                    if save_as_best:
+                        torch.save(
+                            ckpt, os.path.join(FLAGS.logdir, 'best_model.pt'))
+                    torch.save(ckpt, os.path.join(FLAGS.logdir, 'model.pt'))
                     metrics = {
                         'IS': IS,
-                        'IS_std': IS_std,
+                        'IS/std': IS_std,
+                        'IS/EMA': IS_ema,
+                        'IS/EMA/std': IS_std_ema,
+                        'IS/Best': best_IS,
                         'FID': FID,
-                        'IS_EMA': IS_ema,
-                        'IS_std_EMA': IS_std_ema,
-                        'FID_EMA': FID_ema,
+                        'FID/EMA': FID_ema,
+                        'FID/best': best_FID,
                     }
                     for name, value in metrics.items():
                         writer.add_scalar(name, value, step)
@@ -417,9 +416,9 @@ def train(rank, world_size):
                     pbar.write(
                         f"{step:{k}d}/{FLAGS.total_steps} "
                         f"IS: {IS:6.3f}({IS_std:.3f}), "
+                        f"IS/EMA: {IS_ema:6.3f}({IS_std_ema:.3f}), "
                         f"FID: {FID:.3f}, "
-                        f"IS_EMA: {IS_ema:6.3f}({IS_std_ema:.3f}), "
-                        f"FID_EMA: {FID_ema:.3f}")
+                        f"FID/EMA: {FID_ema:.3f}")
     if rank == 0:
         writer.close()
 
