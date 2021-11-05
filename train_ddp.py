@@ -127,20 +127,20 @@ def eval_save(rank, world_size):
         with tqdm(total=FLAGS.num_images, ncols=0,
                   desc='Sample images') as pbar:
             for batch_images in image_generator(net_G):
-                images.append(batch_images)
                 if FLAGS.save:
                     for image in batch_images:
                         save_image(
                             image, os.path.join(FLAGS.save, f'{counter}.png'))
                         counter += 1
+                else:
+                    images.append(batch_images)
                 pbar.update(len(batch_images))
-        images = torch.cat(images, dim=0)
         if FLAGS.eval:
             if FLAGS.save:
                 (IS, IS_std), FID = get_inception_score_and_fid_from_directory(
-                    FLAGS.save, FLAGS.fid_stats, num_images=FLAGS.num_images,
-                    verbose=True)
+                    FLAGS.save, FLAGS.fid_stats, verbose=True)
             else:
+                images = torch.cat(images, dim=0)
                 (IS, IS_std), FID = get_inception_score_and_fid(
                     images, FLAGS.fid_stats, verbose=True)
             print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
