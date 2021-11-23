@@ -50,8 +50,8 @@ class ConditionalBatchNorm2d(nn.Module):
     def __init__(self, in_channel, cond_size, linear=True):
         super().__init__()
         if linear:
-            self.gain = sn(nn.Linear(cond_size, in_channel, bias=False))
-            self.bias = sn(nn.Linear(cond_size, in_channel, bias=False))
+            self.gain = nn.Linear(cond_size, in_channel, bias=False)
+            self.bias = nn.Linear(cond_size, in_channel, bias=False)
         else:
             self.gain = nn.Embedding(cond_size, in_channel)
             self.bias = nn.Embedding(cond_size, in_channel)
@@ -79,16 +79,16 @@ class GenBlock(nn.Module):
         self.residual1 = nn.Sequential(
             nn.ReLU(inplace=True),
             nn.Upsample(scale_factor=2),
-            sn(nn.Conv2d(in_channels, out_channels, 3, stride=1, padding=1)))
+            nn.Conv2d(in_channels, out_channels, 3, stride=1, padding=1))
         self.bn2 = ConditionalBatchNorm2d(out_channels, cbn_in_dim, cbn_linear)
         self.residual2 = nn.Sequential(
             nn.ReLU(inplace=True),
-            sn(nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1)))
+            nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1))
 
         # shortcut
         self.shortcut = nn.Sequential(
             nn.Upsample(scale_factor=2),
-            sn(nn.Conv2d(in_channels, out_channels, 1, stride=1, padding=0)))
+            nn.Conv2d(in_channels, out_channels, 1, stride=1, padding=0))
 
     def forward(self, x, y):
         h = self.residual1(self.bn1(x, y))
@@ -146,7 +146,7 @@ class Generator128(nn.Module):
             GenBlock(ch * 8, ch * 4, cbn_in_dim),    # ch*8 x 16 x 16
             nn.ModuleList([                          # ch*4 x 32 x 32
                 GenBlock(ch * 4, ch * 2, cbn_in_dim),
-                Attention(ch * 2, True),             # ch*2 x 64 x 64
+                Attention(ch * 2, True),            # ch*2 x 64 x 64
             ]),
             GenBlock(ch * 2, ch * 1, cbn_in_dim),    # ch*1 x 128 x 128
         ])
