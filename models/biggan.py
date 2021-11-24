@@ -50,8 +50,8 @@ class ConditionalBatchNorm2d(nn.Module):
     def __init__(self, in_channel, cond_size, linear=True):
         super().__init__()
         if linear:
-            self.gain = nn.Linear(cond_size, in_channel, bias=False)
-            self.bias = nn.Linear(cond_size, in_channel, bias=False)
+            self.gain = sn(nn.Linear(cond_size, in_channel, bias=False))
+            self.bias = sn(nn.Linear(cond_size, in_channel, bias=False))
         else:
             self.gain = nn.Embedding(cond_size, in_channel)
             self.bias = nn.Embedding(cond_size, in_channel)
