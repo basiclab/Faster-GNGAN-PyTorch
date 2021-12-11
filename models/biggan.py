@@ -129,7 +129,7 @@ class Generator32(nn.Module):
 
 
 class Generator128(nn.Module):
-    def __init__(self, z_dim=128, n_classes=1000, ch=96, shared_dim=128):
+    def __init__(self, z_dim=120, n_classes=1000, ch=96, shared_dim=128):
         super().__init__()
         channels_multipler = [16, 16, 8, 4, 2, 1]
         num_slots = len(channels_multipler)
@@ -146,7 +146,7 @@ class Generator128(nn.Module):
             GenBlock(ch * 8, ch * 4, cbn_in_dim),    # ch*8 x 16 x 16
             nn.ModuleList([                          # ch*4 x 32 x 32
                 GenBlock(ch * 4, ch * 2, cbn_in_dim),
-                Attention(ch * 2, True),            # ch*2 x 64 x 64
+                Attention(ch * 2, True),             # ch*2 x 64 x 64
             ]),
             GenBlock(ch * 2, ch * 1, cbn_in_dim),    # ch*1 x 128 x 128
         ])
@@ -156,21 +156,29 @@ class Generator128(nn.Module):
             nn.ReLU(inplace=True),
             sn(nn.Conv2d(ch * 1, 3, 3, padding=1)),  # 3 x 128 x 128
             nn.Tanh())
+        self.initialize()
+
+    def initialize(self):
+        for m in self.modules():
+            if isinstance(m, (nn.Conv2d, nn.Linear, nn.Embedding)):
+                torch.nn.init.xavier_uniform_(m.weight)
+                if hasattr(m, 'bias') and m.bias is not None:
+                    torch.nn.init.zeros_(m.bias)
 
     def forward(self, z, y):
         y = self.shared_embedding(y)
-        zs = torch.split(z, self.chunk_size, 1)
-        ys = [torch.cat([y, item], 1) for item in zs[1:]]
+        zs = torch.split(z, self.chunk_size, dim=1)
+        yzs = [torch.cat([y, z], dim=1) for z in zs[1:]]
 
-        h = self.linear(zs[0]).view(z.size(0), -1, 4, 4)
-        for i, block in enumerate(self.blocks):
+        batch_size = z.size(0)
+        h = self.linear(zs[0]).view(batch_size, -1, 4, 4)
+        for yz, block in zip(yzs, self.blocks):
             if isinstance(block, nn.ModuleList):
                 for module in block:
-                    h = module(h, ys[i])
+                    h = module(h, yz)
             else:
-                h = block(h, ys[i])
+                h = block(h, yz)
         h = self.output_layer(h)
-
         return h
 
 
@@ -179,17 +187,16 @@ class ReScaleBlock(nn.Module):
         super().__init__()
         self.shortcut_scale = 1
 
-    @torch.no_grad()
-    def rescale_block(self, base_scale, min_scale=0.7, max_scale=1.0):
+    def rescale_block(self, base_scale, alpha):
         residual_scale = base_scale
         for module in self.residual.modules():
             if isinstance(module, Rescalable):
-                residual_scale = module.rescale(residual_scale)
+                residual_scale = module.rescale(residual_scale, alpha)
 
         shortcut_scale = base_scale
         for module in self.shortcut.modules():
             if isinstance(module, Rescalable):
-                shortcut_scale = module.rescale(shortcut_scale)
+                shortcut_scale = module.rescale(shortcut_scale, alpha)
         self.shortcut_scale = residual_scale / shortcut_scale
 
         return residual_scale
@@ -241,13 +248,13 @@ class ReScaleModel(nn.Module):
         super().__init__()
         self.embedding_scale = 1
 
-    def rescale_model(self):
+    def rescale_model(self, alpha):
         base_scale = 1
         for block in self.model:
             if isinstance(block, ReScaleBlock):
-                base_scale = block.rescale_block(base_scale)
-        linear_scale = self.linear.rescale(base_scale)
-        embedding_scale = self.embedding.rescale(base_scale)
+                base_scale = block.rescale_block(base_scale, alpha)
+        linear_scale = self.linear.rescale(base_scale, alpha)
+        embedding_scale = self.embedding.rescale(base_scale, alpha)
         self.embedding_scale = linear_scale / embedding_scale
         return linear_scale
 
@@ -307,64 +314,7 @@ class Discriminator128(ReScaleModel):
     def initialize(self):
         for m in self.modules():
             if isinstance(m, Rescalable):
-                torch.nn.init.orthogonal_(m.module.weight)
+                torch.nn.init.xavier_uniform_(m.module.weight)
+                if hasattr(m.module, 'bias') and m.module.bias is not None:
+                    torch.nn.init.zeros_(m.module.bias)
                 m.init_module_scale()
-            if isinstance(m, (nn.Conv2d, nn.Linear, nn.Embedding)):
-                torch.nn.init.orthogonal_(m.weight)
-
-
-if __name__ == '__main__':
-    Models = [
-        (32, 10, Discriminator32),
-        (128, 1000, Discriminator128),
-    ]
-    for res, n_classes, Model in Models:
-        print("=" * 80)
-        print(Model.__name__)
-        x = torch.randn(1, 3, res, res, requires_grad=True).cuda()
-        y = torch.randint(n_classes, (1,)).cuda()
-        net_D = Model(n_classes).cuda()
-        f = net_D(x, y=y)
-        grad_f = torch.autograd.grad(f.sum(), x)[0]
-        grad_norm = torch.norm(torch.flatten(grad_f, start_dim=1), p=2, dim=1)
-        grad_norm = grad_norm.view(-1, 1)
-        f_hat = f / (grad_norm + torch.abs(f))
-        print('     '
-              f'{"Output":>11s}, {"Raw Output":>11s}, {"Grad Norm":>11s}')
-        print('ORIG '
-              f'{f_hat.item():+11.7f}, '
-              f'{f.item():+11.7f}, '
-              f'{grad_norm.item():+11.7f}')
-
-        for step in range(10):
-            net_D.rescale_model()
-            f_scaled = net_D(x, y=y)
-            grad_f_scaled = torch.autograd.grad(f_scaled.sum(), x)[0]
-            grad_norm_scaled = torch.norm(
-                torch.flatten(grad_f_scaled, start_dim=1), p=2, dim=1)
-            grad_norm_scaled = grad_norm_scaled.view(-1, 1)
-            f_hat_scaled = f_scaled / (grad_norm_scaled + torch.abs(f_scaled))
-
-            alpha1 = f_scaled / f
-            alpha2 = grad_norm_scaled / grad_norm
-            if step < 5:
-                assert torch.allclose(
-                    alpha1, alpha2, rtol=1e-04, atol=1e-06), \
-                    f'{alpha1.item():.7f}, {alpha2.item():.7f}'
-                assert torch.allclose(
-                    f_hat, f_hat_scaled, rtol=1e-04, atol=1e-06), \
-                    f'{f_hat.item():.7f}, {f_hat_scaled.item():.7f}'
-            else:
-                if not torch.allclose(alpha1, alpha2, rtol=1e-04, atol=1e-06):
-                    print(f'WARN1 '
-                          f'{alpha1.item():+.7f} != {alpha2.item():+.7f}')
-                if not torch.allclose(
-                        f_hat, f_hat_scaled, rtol=1e-04, atol=1e-06):
-                    print(f'WARN2 '
-                          f'{f_hat.item():+.7f}, '
-                          f'{f_hat_scaled.item():+.7f}')
-
-            print('PASS '
-                  f'{f_hat_scaled.item():+11.7f}, '
-                  f'{f_scaled.item():+11.7f}, '
-                  f'{grad_norm_scaled.item():+11.7f}')

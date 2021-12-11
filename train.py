@@ -66,6 +66,7 @@ flags.DEFINE_integer('n_dis', 5, "update generator per this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
 flags.DEFINE_float('cr', 0, "weight for consistency regularization")
 flags.DEFINE_bool('rescale', False, 'rescale output of each layer')
+flags.DEFINE_float('alpha', 1.0, 'hyper parameter for rescaling')
 flags.DEFINE_integer('seed', 0, "random seed")
 # conditional
 flags.DEFINE_integer('n_classes', 1, 'the number of classes in dataset')
@@ -143,6 +144,7 @@ def consistency_loss(net_D, real, y_real, pred_real,
     return loss
 
 
+# Record norm of output feature at each layer
 class ScaleHook:
     def __init__(self, name):
         self.name = name
@@ -244,7 +246,7 @@ def train():
             # Discriminator
             for _ in range(FLAGS.n_dis):
                 if FLAGS.rescale:
-                    net_D.rescale_model()
+                    net_D.rescale_model(FLAGS.alpha)
 
                 optim_D.zero_grad()
                 x_real, y_real = next(x).to(device), next(y).to(device)

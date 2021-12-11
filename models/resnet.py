@@ -37,7 +37,7 @@ class GenBlock(nn.Module):
 
 
 class ResGenerator32(nn.Module):
-    def __init__(self, z_dim, *args):
+    def __init__(self, z_dim, *args, **kwargs):
         super().__init__()
         self.linear = nn.Linear(z_dim, 4 * 4 * 256)
         self.blocks = nn.Sequential(
@@ -69,7 +69,7 @@ class ResGenerator32(nn.Module):
 
 
 class ResGenerator48(nn.Module):
-    def __init__(self, z_dim, *args):
+    def __init__(self, z_dim, *args, **kwargs):
         super().__init__()
         self.linear = nn.Linear(z_dim, 6 * 6 * 512)
         self.blocks = nn.Sequential(
@@ -101,7 +101,7 @@ class ResGenerator48(nn.Module):
 
 
 class ResGenerator128(nn.Module):
-    def __init__(self, z_dim):
+    def __init__(self, z_dim, *args, **kwargs):
         super().__init__()
         self.linear = nn.Linear(z_dim, 4 * 4 * 1024)
 
@@ -129,14 +129,14 @@ class ResGenerator128(nn.Module):
                 init.kaiming_normal_(m.weight)
                 init.zeros_(m.bias)
 
-    def forward(self, z):
+    def forward(self, z, *args, **kwargs):
         inputs = self.linear(z)
         inputs = inputs.view(-1, 1024, 4, 4)
         return self.output(self.blocks(inputs))
 
 
 class ResGenerator256(nn.Module):
-    def __init__(self, z_dim):
+    def __init__(self, z_dim, *args, **kwargs):
         super().__init__()
         self.linear = nn.Linear(z_dim, 4 * 4 * 1024)
 
@@ -165,7 +165,7 @@ class ResGenerator256(nn.Module):
                 init.kaiming_normal_(m.weight)
                 init.zeros_(m.bias)
 
-    def forward(self, z):
+    def forward(self, z, *args, **kwargs):
         inputs = self.linear(z)
         inputs = inputs.view(-1, 1024, 4, 4)
         return self.output(self.blocks(inputs))
@@ -177,16 +177,16 @@ class ReScaleBlock(nn.Module):
         self.shortcut_scale = 1
 
     @torch.no_grad()
-    def rescale_block(self, base_scale):
+    def rescale_block(self, base_scale, alpha=1.):
         residual_scale = base_scale
         for module in self.residual.modules():
             if isinstance(module, Rescalable):
-                residual_scale = module.rescale(residual_scale)
+                residual_scale = module.rescale(residual_scale, alpha)
 
         shortcut_scale = base_scale
         for module in self.shortcut.modules():
             if isinstance(module, Rescalable):
-                shortcut_scale = module.rescale(shortcut_scale)
+                shortcut_scale = module.rescale(shortcut_scale, alpha)
         self.shortcut_scale = residual_scale / shortcut_scale
 
         return residual_scale
@@ -252,12 +252,12 @@ class DisBlock(ReScaleBlock):
 
 
 class ReScaleModel(nn.Module):
-    def rescale_model(self):
+    def rescale_model(self, alpha=1.):
         base_scale = 1
         for block in self.model:
             if isinstance(block, ReScaleBlock):
                 base_scale = block.rescale_block(base_scale)
-        base_scale = self.linear.rescale(base_scale)
+        base_scale = self.linear.rescale(base_scale, alpha)
         return base_scale
 
     def forward(self, x, *args, **kwargs):
@@ -273,7 +273,7 @@ class ReScaleModel(nn.Module):
 
 
 class ResDiscriminator32(ReScaleModel):
-    def __init__(self, *args):
+    def __init__(self, *args, **kwargs):
         super().__init__()
         self.model = nn.Sequential(
             OptimizedDisblock(3, 128),
@@ -288,7 +288,7 @@ class ResDiscriminator32(ReScaleModel):
 
 
 class ResDiscriminator48(ReScaleModel):
-    def __init__(self, *args):
+    def __init__(self, *args, **kwargs):
         super().__init__()
         self.model = nn.Sequential(
             OptimizedDisblock(3, 64),
@@ -303,7 +303,7 @@ class ResDiscriminator48(ReScaleModel):
 
 
 class ResDiscriminator128(ReScaleModel):
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         super().__init__()
         self.model = nn.Sequential(
             OptimizedDisblock(3, 64),
@@ -320,7 +320,7 @@ class ResDiscriminator128(ReScaleModel):
 
 
 class ResDiscriminator256(ReScaleModel):
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         super().__init__()
         self.model = nn.Sequential(
             OptimizedDisblock(3, 64),
@@ -335,62 +335,3 @@ class ResDiscriminator256(ReScaleModel):
         self.linear = Rescalable(nn.Linear(1024, 1))
         # initialize weight
         self.initialize()
-
-
-if __name__ == '__main__':
-    Models = [
-        (32, ResDiscriminator32),
-        (48, ResDiscriminator48),
-        (128, ResDiscriminator128),
-        (256, ResDiscriminator256),
-    ]
-    for res, Model in Models:
-        print("=" * 80)
-        print(Model.__name__)
-        x = torch.randn(2, 3, res, res, requires_grad=True).cuda()
-        net_D = Model().cuda()
-        f = net_D(x)
-        grad_f = torch.autograd.grad(f.sum(), x)[0]
-        grad_norm = torch.norm(torch.flatten(grad_f, start_dim=1), p=2, dim=1)
-        grad_norm = grad_norm.view(-1, 1)
-        f_hat = f / (grad_norm + torch.abs(f))
-        print('     '
-              f'{"Output":>11s}, {"Raw Output":>11s}, {"Grad Norm":>11s}')
-        print('ORIG '
-              f'{f_hat[0].item():+11.7f}, '
-              f'{f[0].item():+11.7f}, '
-              f'{grad_norm[0].item():+11.7f}')
-
-        for step in range(10):
-            net_D.rescale_model()
-            f_scaled = net_D(x)
-            grad_f_scaled = torch.autograd.grad(f_scaled.sum(), x)[0]
-            grad_norm_scaled = torch.norm(
-                torch.flatten(grad_f_scaled, start_dim=1), p=2, dim=1)
-            grad_norm_scaled = grad_norm_scaled.view(-1, 1)
-            f_hat_scaled = f_scaled / (grad_norm_scaled + torch.abs(f_scaled))
-
-            alpha1 = f / f_scaled
-            alpha2 = grad_norm / grad_norm_scaled
-            if step < 5:
-                assert torch.allclose(
-                    alpha1, alpha2, rtol=1e-04, atol=1e-06), \
-                    f'{alpha1[0].item():.7f}, {alpha2[0].item():.7f}'
-                assert torch.allclose(
-                    f_hat, f_hat_scaled, rtol=1e-04, atol=1e-06), \
-                    f'{f_hat[0].item():.7f}, {f_hat_scaled[0].item():.7f}'
-            else:
-                if not torch.allclose(alpha1, alpha2, rtol=1e-04, atol=1e-06):
-                    print(
-                        f'WARN1 '
-                        f'{alpha1[0].item():+.7f} != {alpha2[0].item():+.7f}')
-                if not torch.allclose(
-                        f_hat, f_hat_scaled, rtol=1e-04, atol=1e-06):
-                    print(f'WARN2 '
-                          f'{f_hat[0].item():+.7f}, '
-                          f'{f_hat_scaled[0].item():+.7f}')
-
-            print('PASS '
-                  f'{f_hat_scaled[0].item():+11.7f}, '
-                  f'{f_scaled[0].item():+11.7f}, '
-                  f'{grad_norm_scaled[0].item():+11.7f}')
