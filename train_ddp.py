@@ -17,7 +17,7 @@ from pytorch_gan_metrics import (
 
 from datasets import get_dataset
 from losses import HingeLoss
-from models import resnet
+from models import resnet, biggan
 from models.gradnorm import (
     normalize_gradient_D, normalize_gradient_G, Rescalable)
 from utils import ema, infiniteloop, set_seed, module_no_grad
@@ -27,11 +27,13 @@ from optim import Adam
 net_G_models = {
     'resnet.128': resnet.ResGenerator128,
     'resnet.256': resnet.ResGenerator256,
+    'biggan.128': biggan.Generator128,
 }
 
 net_D_models = {
     'resnet.128': resnet.ResDiscriminator128,
     'resnet.256': resnet.ResDiscriminator256,
+    'biggan.128': biggan.Discriminator128,
 }
 
 datasets = [
@@ -40,6 +42,7 @@ datasets = [
     'lsun_church.256',
     'lsun_bedroom.256',
     'lsun_horse.256',
+    'imagenet.128'
 ]
 
 
@@ -62,7 +65,10 @@ flags.DEFINE_multi_float('betas', [0.0, 0.9], "for Adam")
 flags.DEFINE_integer('n_dis', 5, "update Generator every this steps")
 flags.DEFINE_integer('z_dim', 128, "latent space dimension")
 flags.DEFINE_bool('rescale', False, 'rescale output of each layer')
+flags.DEFINE_float('alpha', 1.0, 'hyper parameter for rescaling')
 flags.DEFINE_integer('seed', 0, "random seed")
+# conditional
+flags.DEFINE_integer('n_classes', 1, 'the number of classes in dataset')
 # ema
 flags.DEFINE_float('ema_decay', 0.9999, "ema decay rate")
 flags.DEFINE_integer('ema_start', 5000, "start step for ema")
@@ -85,7 +91,9 @@ def image_generator(net_G):
     with torch.no_grad():
         for idx in range(0, FLAGS.num_images, FLAGS.batch_size_G):
             z = torch.randn(local_batch_size, FLAGS.z_dim).to(rank)
-            fake = (net_G(z) + 1) / 2
+            y = torch.randint(
+                FLAGS.n_classes, (local_batch_size,)).to(rank)
+            fake = (net_G(z, y) + 1) / 2
             fake_list = [torch.empty_like(fake) for _ in range(world_size)]
             dist.all_gather(fake_list, fake)
             fake = torch.cat(fake_list, dim=0).cpu()
@@ -107,7 +115,16 @@ def eval_save(rank, world_size):
     with torch.no_grad():
         fixed_z = torch.cat(ckpt['fixed_z'], dim=0).to(device)
         fixed_z = torch.split(fixed_z, len(fixed_z) // world_size, dim=0)
-        fake = (net_G(fixed_z[rank]) + 1) / 2
+        if 'fixed_y' in ckpt:
+            fixed_y = torch.cat(ckpt['fixed_y'], dim=0).to(device)
+            fixed_y = torch.split(fixed_y, len(fixed_y) // world_size, dim=0)
+        else:
+            # legacy checkpoint for unconditional generation
+            fixed_y = torch.randint(
+                FLAGS.n_classes, (len(fixed_z),)).to(device)
+            fixed_y = torch.split(fixed_y, len(fixed_z) // world_size, dim=0)
+
+        fake = (net_G(fixed_z[rank], fixed_y[rank]) + 1) / 2
         fake_list = [torch.empty_like(fake) for _ in range(world_size)]
         dist.all_gather(fake_list, fake)
         if rank == 0:
@@ -245,6 +262,9 @@ def train(rank, world_size):
         # sample fixed z
         fixed_z = torch.randn(FLAGS.sample_size, FLAGS.z_dim).to(device)
         fixed_z = torch.split(fixed_z, FLAGS.sample_size // world_size, dim=0)
+        fixed_y = torch.randint(
+            FLAGS.n_classes, (FLAGS.sample_size,)).to(device)
+        fixed_y = torch.split(fixed_y, FLAGS.sample_size // world_size, dim=0)
         # start value
         start, best_IS, best_FID = 1, 0, 999
 
@@ -276,25 +296,31 @@ def train(rank, world_size):
             loss_real_sum = 0
             loss_fake_sum = 0
 
-            x = next(looper)[0]
+            x, y = next(looper)
             x = iter(torch.split(x, local_batch_size_D))
+            y = iter(torch.split(y, local_batch_size_D))
             # Discriminator
             for _ in range(FLAGS.n_dis):
                 if FLAGS.rescale:
-                    net_D.module.rescale_model()
+                    net_D.module.rescale_model(FLAGS.alpha)
 
                 optim_D.zero_grad()
                 for _ in range(FLAGS.accumulation):
-                    real = next(x).to(device)
-                    z = torch.randn(
-                        local_batch_size_D, FLAGS.z_dim, device=device)
+                    x_real = next(x).to(device)
+                    y_real = next(y).to(device)
 
                     with torch.no_grad():
-                        fake = net_G(z).detach()
-                    real_fake = torch.cat([real, fake], dim=0)
-                    pred = normalize_gradient_D(net_D, real_fake)
+                        z_ = torch.randn(
+                            local_batch_size_D, FLAGS.z_dim, device=device)
+                        y_fake = torch.randint(
+                            FLAGS.n_classes, (local_batch_size_D,)).to(device)
+                        x_fake = net_G(z_, y_fake).detach()
+                    x_real_fake = torch.cat([x_real, x_fake], dim=0)
+                    y_real_fake = torch.cat([y_real, y_fake], dim=0)
+                    pred = normalize_gradient_D(
+                        net_D, x_real_fake, y=y_real_fake)
                     pred_real, pred_fake = torch.split(
-                        pred, [real.shape[0], fake.shape[0]])
+                        pred, [x_real.shape[0], x_fake.shape[0]])
 
                     loss, loss_real, loss_fake = loss_fn(pred_real, pred_fake)
                     loss = loss / FLAGS.accumulation
@@ -325,10 +351,13 @@ def train(rank, world_size):
             optim_G.zero_grad()
             with module_no_grad(net_D):
                 for _ in range(FLAGS.accumulation):
-                    z = torch.randn(
+                    z_ = torch.randn(
                         local_batch_size_G, FLAGS.z_dim, device=device)
-                    fake = net_G(z)
-                    pred_fake, h = normalize_gradient_G(net_D, loss_fn, fake)
+                    y_ = torch.randint(
+                        FLAGS.n_classes, (local_batch_size_G,)).to(device)
+                    fake = net_G(z_, y_)
+                    pred_fake, h = normalize_gradient_G(
+                        net_D, loss_fn, fake, y=y_)
                     loss = pred_fake.mean() / FLAGS.accumulation
                     loss.backward()
                     h.remove()
@@ -344,8 +373,8 @@ def train(rank, world_size):
             # sample from fixed z
             if step == 1 or step % FLAGS.sample_step == 0:
                 with torch.no_grad():
-                    fake_ema = (ema_G(fixed_z[rank]) + 1) / 2
-                    fake_net = (net_G(fixed_z[rank]) + 1) / 2
+                    fake_ema = (ema_G(fixed_z[rank], fixed_y[rank]) + 1) / 2
+                    fake_net = (net_G(fixed_z[rank], fixed_y[rank]) + 1) / 2
                 fake_ema_list = [
                     torch.empty_like(fake_ema) for _ in range(world_size)]
                 fake_net_list = [
@@ -368,7 +397,6 @@ def train(rank, world_size):
             if step == 1 or step % FLAGS.eval_step == 0:
                 (IS, IS_std), FID = evaluate(net_G)
                 (IS_ema, IS_std_ema), FID_ema = evaluate(ema_G)
-
                 if rank == 0:
                     if not math.isnan(FID_ema) and not math.isnan(best_FID):
                         save_as_best = (FID_ema < best_FID)
@@ -383,6 +411,7 @@ def train(rank, world_size):
                         'ema_G': ema_G.state_dict(),
                         'optim_G': optim_G.state_dict(),
                         'optim_D': optim_D.state_dict(),
+                        'fixed_z': fixed_z,
                         'fixed_z': fixed_z,
                         'best_IS': best_IS,
                         'best_FID': best_FID,

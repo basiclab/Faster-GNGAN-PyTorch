@@ -73,6 +73,9 @@ def get_dataset(name, in_memory=True):
     if name == 'lsun_horse':
         dataset = datasets.LSUNClass(
             './data/lsun/horse', transform, (lambda x: 0))
+    if name == 'imagenet':
+        dataset = datasets.ImageFolder(
+            './data/imagenet/raw/train', transform, (lambda x: 0))
     if dataset is None:
         raise ValueError(f'Unknown dataset {name}')
     return dataset
@@ -107,3 +110,4 @@ if __name__ == '__main__':
                 key = f'{i}'.encode()
                 img = open(file, 'rb').read()
                 txn.put(key, img)
+

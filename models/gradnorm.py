@@ -70,9 +70,9 @@ class Rescalable(nn.Module):
         setattr(self.module, name, params.data)
 
     @torch.no_grad()
-    def rescale(self, base_scale=1.):
+    def rescale(self, base_scale=1., scale=1.):
         if 'weight_raw' in self.module._parameters:
-            self.module.weight_scale = self.module.weight_norm / (
+            self.module.weight_scale = scale * self.module.weight_norm / (
                 self.module.weight_raw.norm(p=2) + 1e-12)
             base_scale = base_scale * self.module.weight_scale
         if 'bias_raw' in self.module._parameters:
