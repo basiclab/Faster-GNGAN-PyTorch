@@ -469,7 +469,7 @@ def initialize_process(rank, world_size):
 
 
 def spawn_process(argv):
-    if os.environ['CUDA_VISIBLE_DEVICES'] is not None:
+    if os.environ.get('CUDA_VISIBLE_DEVICES', None) is not None:
         world_size = len(os.environ['CUDA_VISIBLE_DEVICES'].split(','))
     else:
         world_size = 1
