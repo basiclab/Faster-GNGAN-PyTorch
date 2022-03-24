@@ -125,7 +125,7 @@ class Generator32(nn.Module):
         for block in self.blocks:
             h = block(h, y)
         h = self.output_layer(h)
-        return h
+        return (h + 1) / 2
 
 
 class Generator128(nn.Module):
@@ -179,7 +179,7 @@ class Generator128(nn.Module):
             else:
                 h = block(h, yz)
         h = self.output_layer(h)
-        return h
+        return (h + 1) / 2
 
 
 class ReScaleBlock(nn.Module):
@@ -259,6 +259,7 @@ class ReScaleModel(nn.Module):
         return linear_scale
 
     def forward(self, x, y):
+        x = x * 2 - 1
         h = self.model(x).sum(dim=[2, 3])
         h = (
             self.linear(h) +

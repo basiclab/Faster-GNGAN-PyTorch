@@ -12,7 +12,8 @@ podman run --hooks-dir=/usr/share/containers/oci/hooks.d/ \
 	-v $(realpath data):$(realpath data) \
 	-v $(realpath logs):$(realpath logs) \
 	-v $(realpath stats):$(realpath stats) \
+	-v $(realpath ~/.cache/torch/hub):/root/.cache/torch/hub \
 	-it \
 	-e CUDA_VISIBLE_DEVICES=$gpuids \
-	w86763777:ngc-21.11-gngan \
+	w86763777:ngc-22.02-gngan \
 	$@

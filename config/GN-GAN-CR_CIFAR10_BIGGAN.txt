@@ -1,5 +1,5 @@
 --dataset=cifar10.32
---arch=biggan.32
+--model=biggan.32
 --loss=hinge
 --total_steps=125000
 --lr_decay_start=125000
@@ -23,6 +23,5 @@
 --eval_step=5000
 --save_step=20000
 --num_images=50000
---best=ema
 --fid_stats=./stats/cifar10.train.npz
 --logdir=./logs/GN-GAN-CR_CIFAR10_BIGGAN_0

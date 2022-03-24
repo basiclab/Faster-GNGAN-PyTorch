@@ -1,10 +1,9 @@
-FROM nvcr.io/nvidia/pytorch:21.11-py3
+FROM nvcr.io/nvidia/pytorch:22.02-py3
 
-RUN pip3 install absl-py \
-    h5py \
+RUN pip3 install \
+    absl-py \
     lmdb \
     tqdm \
-    scipy==1.5.4 \
     pytorch-gan-metrics \
     tensorboardX
 

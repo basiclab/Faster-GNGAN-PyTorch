@@ -65,7 +65,8 @@ class ResGenerator32(nn.Module):
     def forward(self, z, *args, **kwargs):
         z = self.linear(z)
         z = z.view(-1, 256, 4, 4)
-        return self.output(self.blocks(z))
+        x = self.output(self.blocks(z))
+        return (x + 1) / 2
 
 
 class ResGenerator48(nn.Module):
@@ -97,7 +98,8 @@ class ResGenerator48(nn.Module):
     def forward(self, z, *args, **kwargs):
         z = self.linear(z)
         z = z.view(-1, 512, 6, 6)
-        return self.output(self.blocks(z))
+        x = self.output(self.blocks(z))
+        return (x + 1) / 2
 
 
 class ResGenerator128(nn.Module):
@@ -130,9 +132,10 @@ class ResGenerator128(nn.Module):
                 init.zeros_(m.bias)
 
     def forward(self, z, *args, **kwargs):
-        inputs = self.linear(z)
-        inputs = inputs.view(-1, 1024, 4, 4)
-        return self.output(self.blocks(inputs))
+        z = self.linear(z)
+        z = z.view(-1, 1024, 4, 4)
+        x = self.output(self.blocks(z))
+        return (x + 1) / 2
 
 
 class ResGenerator256(nn.Module):
@@ -166,9 +169,10 @@ class ResGenerator256(nn.Module):
                 init.zeros_(m.bias)
 
     def forward(self, z, *args, **kwargs):
-        inputs = self.linear(z)
-        inputs = inputs.view(-1, 1024, 4, 4)
-        return self.output(self.blocks(inputs))
+        z = self.linear(z)
+        z = z.view(-1, 1024, 4, 4)
+        x = self.output(self.blocks(z))
+        return (x + 1) / 2
 
 
 class ReScaleBlock(nn.Module):
@@ -261,6 +265,7 @@ class ReScaleModel(nn.Module):
         return base_scale
 
     def forward(self, x, *args, **kwargs):
+        x = x * 2 - 1
         x = self.model(x)
         x = torch.flatten(x, start_dim=1)
         x = self.linear(x)

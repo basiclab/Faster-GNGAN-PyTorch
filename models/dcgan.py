@@ -36,7 +36,7 @@ class Generator(nn.Module):
         x = self.linear(z)
         x = x.view(x.size(0), -1, self.M, self.M)
         x = self.main(x)
-        return x
+        return (x + 1) / 2
 
 
 class Discriminator(nn.Module):
@@ -89,6 +89,7 @@ class Discriminator(nn.Module):
         return base_scale
 
     def forward(self, x, *args, **kwargs):
+        x = x * 2 - 1
         x = self.main(x)
         x = torch.flatten(x, start_dim=1)
         x = self.linear(x)

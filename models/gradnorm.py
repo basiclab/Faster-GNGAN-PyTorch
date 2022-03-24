@@ -29,8 +29,9 @@ def normalize_gradient_G(net_D, loss_fn, x, **kwargs):
             grad = loss_scale * grad_scale * grad
         return grad
     f = net_D(x, **kwargs)
-    h = x.register_hook(partial(hook, f=f, loss_fn=loss_fn))
-    return f, h
+    # handle is used to remove hook after forward pass to prevent memory leak.
+    handle = x.register_hook(partial(hook, f=f, loss_fn=loss_fn))
+    return f, handle
 
 
 def normalize_gradient_D(net_D, x, **kwargs):

@@ -1,5 +1,5 @@
 --dataset=stl10.48
---arch=dcgan.48
+--model=dcgan.48
 --loss=bce
 --total_steps=200000
 --lr_decay_start=200000
@@ -21,6 +21,5 @@
 --eval_step=5000
 --save_step=20000
 --num_images=50000
---best=orig
 --fid_stats=./stats/stl10.unlabeled.48.npz
 --logdir=./logs/GN-GAN-CR_STL10_CNN_0

@@ -1,5 +1,5 @@
 --dataset=imagenet.128
---arch=biggan.128
+--model=biggan.128
 --total_steps=200000
 --batch_size_D=256
 --batch_size_G=256

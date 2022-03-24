@@ -1,5 +1,5 @@
 --dataset=lsun_church.256
---arch=resnet.256
+--model=resnet.256
 --total_steps=100000
 --batch_size_D=64
 --batch_size_G=128

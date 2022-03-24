@@ -51,7 +51,6 @@ def get_dataset(name, in_memory=True):
         T.Resize((img_size, img_size)),
         T.RandomHorizontalFlip(),
         T.ToTensor(),
-        T.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ])
 
     dataset = None
@@ -110,4 +109,3 @@ if __name__ == '__main__':
                 key = f'{i}'.encode()
                 img = open(file, 'rb').read()
                 txn.put(key, img)
-

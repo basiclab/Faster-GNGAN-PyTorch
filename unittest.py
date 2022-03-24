@@ -1,9 +1,7 @@
-import torch
+def test_model_rescaling():
+    import torch
+    from models import biggan, resnet, dcgan
 
-from models import biggan, resnet, dcgan
-
-
-if __name__ == '__main__':
     """
     The unit test of model rescaling
     """
@@ -18,7 +16,6 @@ if __name__ == '__main__':
         (48, 1, dcgan.Discriminator48, 'DCGAN'),
     ]
     alpha_range = torch.linspace(start=1, end=1e-2, steps=10)
-    # Test each discriminator in list
     for res, n_classes, Model, family in Models:
         print("=" * 80)
         print(family, Model.__name__)
@@ -69,3 +66,70 @@ if __name__ == '__main__':
                       f'{f_hat_scaled.item():+.7f} != '
                       f'{f_hat.item():+.7f}', end='; ')
             print('')
+
+
+def test_loss():
+    import torch
+    import random
+    import numpy as np
+    from models.gradnorm import normalize_gradient_G, normalize_gradient_D
+    from utils.losses import BCE, BCEWithLogits, HingeLoss, Wasserstein
+
+    def create_D():
+        return torch.nn.Sequential(
+            torch.nn.Conv2d(3, 16, 3, 1, 1),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(16, 32, 3, 1, 1),
+            torch.nn.ReLU(),
+            torch.nn.AdaptiveAvgPool2d((1, 1)),
+            torch.nn.Flatten(start_dim=1),
+            torch.nn.Linear(32, 1),
+        )
+
+    random.seed(0)
+    np.random.seed(0)
+    torch.manual_seed(0)
+    torch.cuda.manual_seed(0)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    D1 = create_D()
+    D2 = create_D()
+    D2.load_state_dict(D1.state_dict())
+
+    loss_fns = [
+        BCEWithLogits(),
+        HingeLoss(),
+        Wasserstein(),
+        BCE(),
+    ]
+    for loss_fn in loss_fns:
+        print("=" * 80)
+        print(loss_fn.__class__.__name__)
+
+        for _ in range(10):
+            x = torch.randn(4, 3, 32, 32, requires_grad=True)
+
+            D1.zero_grad()
+            y1 = normalize_gradient_D(D1, x)
+            loss = loss_fn(y1)
+            loss.backward()
+            grad1 = x.grad.detach().clone()
+            x.grad.zero_()
+
+            D2.zero_grad()
+            y2, _ = normalize_gradient_G(D2, loss_fn, x)
+            loss = y2.mean()
+            loss.backward()
+            grad2 = x.grad.detach().clone()
+            x.grad.zero_()
+
+            print('Grad Diff: %.7f' % torch.max(torch.abs(grad1 - grad2)).item())
+
+            assert torch.allclose(grad1, grad2)
+        print("PASS")
+
+
+if __name__ == '__main__':
+    test_model_rescaling()
+    test_loss()
