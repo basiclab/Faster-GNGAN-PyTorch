@@ -1,14 +1,10 @@
-import datetime
 import os
 
 import torch
-import torch.distributed as dist
 from absl import app, flags
 from pytorch_gan_metrics import (
     get_inception_score_and_fid_from_directory,
     get_inception_score_and_fid)
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.multiprocessing import Process
 from torchvision.utils import save_image
 
 from utils import generate_images, set_seed
@@ -16,31 +12,19 @@ from utils.args import FLAGS, net_G_models
 
 
 flags.DEFINE_string('save', None, 'save samples images to directory')
+flags.DEFINE_bool('ema', False, 'evaluate ema model')
 
 
-def main(rank, world_size):
-    device = torch.device('cuda:%d' % rank)
+def main(argv):
+    device = torch.device('cuda:0')
 
     ckpt = torch.load(
         os.path.join(FLAGS.logdir, 'best_model.pt'), map_location='cpu')
     net_G = net_G_models[FLAGS.model](FLAGS.z_dim).to(device)
-    net_G = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net_G)
-    net_G.load_state_dict(ckpt['ema_G'])
-    net_G = DDP(net_G, device_ids=[rank], output_device=rank)
-
-    # generate from fixed noise
-    with torch.no_grad():
-        fixed_z = ckpt['fixed_z']
-        fixed_z = torch.split(fixed_z, len(fixed_z) // world_size, dim=0)
-        fixed_y = ckpt['fixed_y']
-        fixed_y = torch.split(fixed_y, len(fixed_y) // world_size, dim=0)
-        fake = net_G(fixed_z[rank], fixed_y[rank])
-        buffer = [torch.empty_like(fake) for _ in range(world_size)]
-        dist.all_gather(buffer, fake)
-        if rank == 0:
-            buffer = torch.cat(buffer, dim=0)
-            save_image(buffer, os.path.join(FLAGS.logdir, 'fixed.png'))
-        dist.barrier()
+    if FLAGS.ema:
+        net_G.load_state_dict(ckpt['ema_G'])
+    else:
+        net_G.load_state_dict(ckpt['net_G'])
 
     # generate random images
     if FLAGS.save:
@@ -54,48 +38,20 @@ def main(rank, world_size):
                                         FLAGS.z_dim,
                                         FLAGS.n_classes,
                                         verbose=True):
-        if rank != 0:
-            continue
         if FLAGS.save:
             for image in batch_images:
                 save_image(image, os.path.join(FLAGS.save, f'{counter}.png'))
                 counter += 1
         else:
             images.append(batch_images.cpu())
-    if rank == 0:
-        if FLAGS.save:
-            (IS, IS_std), FID = get_inception_score_and_fid_from_directory(
-                FLAGS.save, FLAGS.fid_stats, verbose=True)
-        else:
-            (IS, IS_std), FID = get_inception_score_and_fid(
-                torch.cat(images, dim=0), FLAGS.fid_stats, verbose=True)
-        print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
-
-
-def initialize_process(rank, world_size):
-    set_seed(FLAGS.seed + rank)
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = FLAGS.port
-    dist.init_process_group(
-        'nccl', timeout=datetime.timedelta(seconds=30), world_size=world_size,
-        rank=rank)
-    torch.cuda.set_device(rank)
-    torch.cuda.empty_cache()
-    print("Node %d is initialized" % rank)
-    main(rank, world_size)
-
-
-def spawn_process(_):
-    world_size = len(os.environ.get('CUDA_VISIBLE_DEVICES', "0").split(','))
-
-    processes = []
-    for rank in range(world_size):
-        p = Process(target=initialize_process, args=(rank, world_size))
-        p.start()
-        processes.append(p)
-    for p in processes:
-        p.join()
+    if FLAGS.save:
+        (IS, IS_std), FID = get_inception_score_and_fid_from_directory(
+            FLAGS.save, FLAGS.fid_stats, verbose=True)
+    else:
+        (IS, IS_std), FID = get_inception_score_and_fid(
+            torch.cat(images, dim=0), FLAGS.fid_stats, verbose=True)
+    print("IS: %6.3f(%.3f), FID: %7.3f" % (IS, IS_std, FID))
 
 
 if __name__ == '__main__':
-    app.run(spawn_process)
+    app.run(main)

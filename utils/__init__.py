@@ -16,10 +16,11 @@ def set_seed(seed):
     # torch.backends.cudnn.benchmark = False
 
 
-def infiniteloop(dataloader, sampler, step):
+def infiniteloop(dataloader, sampler=None, step=1):
     epoch = step // len(dataloader)    # resume training from last epoch
     while True:
-        sampler.set_epoch(epoch)
+        if sampler:
+            sampler.set_epoch(epoch)
         for x, y in iter(dataloader):
             yield x, y
         epoch += 1
@@ -53,6 +54,22 @@ def module_no_grad(m: torch.nn.Module):
 
 def generate_images(net_G, batch_size, num_images, z_dim, n_classes,
                     verbose=False):
+    device = torch.device('cuda:0')
+    with torch.no_grad():
+        progress = tqdm(
+            total=num_images, desc="Generate Imgs", ncols=0,
+            leave=False, disable=(verbose == 0))
+        for iter_i in range(0, num_images, batch_size):
+            z = torch.randn(batch_size, z_dim).to(device)
+            y = torch.randint(n_classes, (batch_size,)).to(device)
+            fake = net_G(z, y)
+            yield fake[:num_images - iter_i]
+            progress.update(len(fake))
+        progress.close()
+
+
+def generate_images_ddp(net_G, batch_size, num_images, z_dim, n_classes,
+                        verbose=False):
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     local_batch_size = batch_size // world_size
