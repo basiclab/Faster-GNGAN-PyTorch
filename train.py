@@ -239,10 +239,14 @@ def main(argv):
                 best['FID/best'] = FID
                 best['IS/best'] = IS
                 save_best_model = True
+            else:
+                save_best_model = False
             if FID_ema < best['FID/EMA/best']:
                 best['FID/EMA/best'] = FID_ema
                 best['IS/EMA/best'] = IS_ema
                 save_best_ema_model = True
+            else:
+                save_best_ema_model = False
             ckpt = {
                 'net_G': net_G.state_dict(),
                 'net_D': net_D.state_dict(),
@@ -262,7 +266,7 @@ def main(argv):
             if save_best_ema_model:                         # best EMA
                 path = os.path.join(FLAGS.logdir, 'best_ema_model.pt')
                 torch.save(ckpt, path)
-            if step == 1 or step % FLAGS.save_step == 0:    # period save
+            if step == 1 or step % FLAGS.save_step == 0:    # periodic save
                 path = os.path.join(FLAGS.logdir, '%06d.pt' % step)
                 torch.save(ckpt, path)
             path = os.path.join(FLAGS.logdir, 'model.pt')   # latest save
