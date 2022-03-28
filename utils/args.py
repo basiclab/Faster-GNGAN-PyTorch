@@ -7,23 +7,23 @@ from .losses import BCEWithLogits, HingeLoss, Wasserstein
 net_G_models = {
     'resnet.128': resnet.ResGenerator128,
     'resnet.256': resnet.ResGenerator256,
-    'biggan.128': biggan.Generator128,
     'dcgan.32': dcgan.Generator32,
     'dcgan.48': dcgan.Generator48,
     'resnet.32': resnet.ResGenerator32,
     'resnet.48': resnet.ResGenerator48,
     'biggan.32': biggan.Generator32,
+    'biggan.128': biggan.Generator128,
 }
 
 net_D_models = {
     'resnet.128': resnet.ResDiscriminator128,
     'resnet.256': resnet.ResDiscriminator256,
-    'biggan.128': biggan.Discriminator128,
     'dcgan.32': dcgan.Discriminator32,
     'dcgan.48': dcgan.Discriminator48,
     'resnet.32': resnet.ResDiscriminator32,
     'resnet.48': resnet.ResDiscriminator48,
     'biggan.32': biggan.Discriminator32,
+    'biggan.128': biggan.Discriminator128,
 }
 
 datasets = [

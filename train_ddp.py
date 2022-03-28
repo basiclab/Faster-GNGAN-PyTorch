@@ -1,6 +1,6 @@
-import os
-import json
 import datetime
+import json
+import os
 
 import torch
 import torch.optim as optim
@@ -219,11 +219,12 @@ def main(rank, world_size):
         records = train(
             net_D, net_G, optim_D, optim_G, loss_fn, looper, hooks, device)
 
-        for name, value in records.items():
-            writer.add_scalar(name, value, step)
-        progress.set_postfix(
-            loss_real='%.3f' % records['loss/real'],
-            loss_fake='%.3f' % records['loss/fake'])
+        if rank == 0:
+            for name, value in records.items():
+                writer.add_scalar(name, value, step)
+            progress.set_postfix(
+                loss_real='%.3f' % records['loss/real'],
+                loss_fake='%.3f' % records['loss/fake'])
 
         # ema
         if step < FLAGS.ema_start:

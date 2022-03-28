@@ -28,7 +28,7 @@ class LMDBDataset(VisionDataset):
         buf = io.BytesIO()
         buf.write(imgbytes)
         buf.seek(0)
-        img = Image.open(buf)
+        img = Image.open(buf).convert('RGB')
 
         if self.transform is not None:
             img = self.transform(img)
@@ -36,13 +36,12 @@ class LMDBDataset(VisionDataset):
         return img, 0
 
 
-def get_dataset(name, in_memory=True):
+def get_dataset(name):
     """Get datasets
 
     Args:
         name: the format [name].[resolution],
               i.g., cifar10.32, celebahq.256
-        in_memory: load dataset into memory.
     """
     name, img_size = name.split('.')
     img_size = int(img_size)
@@ -73,8 +72,8 @@ def get_dataset(name, in_memory=True):
         dataset = datasets.LSUNClass(
             './data/lsun/horse', transform, (lambda x: 0))
     if name == 'imagenet':
-        dataset = datasets.ImageFolder(
-            './data/imagenet/raw/train', transform, (lambda x: 0))
+        dataset = LMDBDataset(
+            './data/imagenet/train', transform=transform)
     if dataset is None:
         raise ValueError(f'Unknown dataset {name}')
     return dataset
