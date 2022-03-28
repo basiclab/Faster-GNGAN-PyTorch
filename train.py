@@ -194,7 +194,8 @@ def main(argv):
     # dataloader loop
     looper = infiniteloop(dataloader)
     progress = trange(start + 1, FLAGS.total_steps + 1,
-                      initial=start, total=FLAGS.total_steps, desc='Training')
+                      initial=start, total=FLAGS.total_steps,
+                      ncols=0, desc='Training')
     for step in progress:
         # a generator update
         records = train(
