@@ -92,9 +92,13 @@ if __name__ == '__main__':
 
     with lmdb.open(args.out, map_size=1024 ** 4, readahead=False) as env:
         with env.begin(write=True) as txn:
-            files = glob(os.path.join(args.path, '**/*.jpg'), recursive=True)
+            files = []
+            files.extend(
+                glob(os.path.join(args.path, '**/*.jpg'), recursive=True))
             files.extend(
                 glob(os.path.join(args.path, '**/*.JPEG'), recursive=True))
+            files.extend(
+                glob(os.path.join(args.path, '**/*.png'), recursive=True))
             try:
                 files = sorted(
                     files,
