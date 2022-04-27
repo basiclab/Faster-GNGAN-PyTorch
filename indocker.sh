@@ -6,7 +6,7 @@ else
     gpuids="$CUDA_VISIBLE_DEVICES"
 fi
 
-podman run --hooks-dir=/usr/share/containers/oci/hooks.d/ \
+docker run \
 	--ipc=host \
 	-v ${PWD}:/gngan \
 	-v $(realpath data):$(realpath data) \
@@ -15,5 +15,5 @@ podman run --hooks-dir=/usr/share/containers/oci/hooks.d/ \
 	-v $(realpath ~/.cache/torch/hub):/root/.cache/torch/hub \
 	-it \
 	-e CUDA_VISIBLE_DEVICES=$gpuids \
-	w86763777:ngc-22.02-gngan \
+	yilun:ngc-22.02-gngan \
 	$@
