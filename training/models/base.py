@@ -65,6 +65,7 @@ class RescalableWrapper(Rescalable):
         assert 'weight' in module._parameters
 
     def init_module(self):
+        """Must be called after parameter initialization"""
         if 'weight' in self.module._parameters:
             self._init_param('weight')
         if 'bias' in self.module._parameters:

@@ -22,6 +22,7 @@ class Hook(object):
         scale = grad_norm / ((grad_norm + torch.abs(self.f)) ** 2)
         return scale.view(-1, 1, 1, 1)
 
+    @torch.no_grad()
     def __call__(self, grad):
         """
         dL     dL                1                df
@@ -32,24 +33,22 @@ class Hook(object):
                v                 v                v
            loss scale     gradient scale   original gradient
         """
-        with torch.no_grad():
-            grad_norm = torch.norm(
-                torch.flatten(grad, start_dim=1), p=2, dim=1) * grad.shape[0]
-            grad = self.loss_scale(grad_norm) * self.grad_scale(grad_norm) * grad
+        grad_norm = torch.norm(
+            torch.flatten(grad, start_dim=1), p=2, dim=1) * grad.shape[0]
+        grad = self.loss_scale(grad_norm) * self.grad_scale(grad_norm) * grad
         self.handle.remove()
         return grad
 
 
-def normalize_gradient_G(net_D, loss_fn, x, **kwargs):
+def normalize_gradient_G(net_D, x, loss_fn, **kwargs):
     f = net_D(x, **kwargs)
-    # print(f)
     hook = Hook(f, loss_fn)
     handle = x.register_hook(hook)
     hook.set_handle(handle)
     return f
 
 
-def normalize_gradient_D(net_D, x, **kwargs):
+def normalize_gradient_D(net_D, x, loss_fn, **kwargs):
     """
                      f
     f_hat = -------------------

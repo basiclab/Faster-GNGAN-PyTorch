@@ -8,6 +8,7 @@ fi
 
 docker run \
 	--ipc=host \
+    --gpus all \
 	-v ${PWD}:/gngan \
 	-v $(realpath data):$(realpath data) \
 	-v $(realpath logs):$(realpath logs) \

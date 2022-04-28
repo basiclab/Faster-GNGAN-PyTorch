@@ -26,7 +26,12 @@ def fid(
     **kwargs
 ):
     imgs = []
-    progress = tqdm(total=eval_size, ncols=0, desc="Generating", leave=False, disable=rank != 0)
+    progress = tqdm(
+        total=eval_size,
+        ncols=0,
+        desc="Generating",
+        leave=False,
+        disable=rank != 0)
     for i in range(0, eval_size, bs_G):
         bs = min(bs_G, eval_size - i)
         z = torch.randn(bs, z_dim, device=device)
@@ -52,19 +57,19 @@ def fid(
 
 
 def train_D(
-    device,
-    loader,
-    loss_meter,
-    D,
-    G,
-    loss_fn,
-    gain,
-    bs_D: int,
-    n_classes: int,
-    z_dim: int,
-    cr_gamma: float,
-    gp_gamma: float,
-    use_gn: bool,
+    device,                 # torch device.
+    loader,                 # Iterator of DataLoader.
+    loss_meter,             # Meter for recording loss value.
+    D,                      # Discriminator.
+    G,                      # Generator.
+    loss_fn,                # Loss function.
+    gain,                   # Loss gain. Used for gradient accumulation.
+    bs_D: int,              # Batch size for D.
+    n_classes: int,         # Number of classes in the dataset.
+    z_dim: int,             # Dimension of latent space.
+    cr_gamma: float,        # Consistency regularization gamma.
+    gp_gamma: float,        # Gradient penalty gamma.
+    use_gn: bool,           # Whether to use gradient normalization.
     **kwargs,
 ):
     images_real, classes_real = next(loader)
@@ -76,7 +81,7 @@ def train_D(
     x = torch.cat([images_real, images_fake], dim=0)
     y = torch.cat([classes_real, classes_fake], dim=0)
     if use_gn:
-        scores = gn.normalize_gradient_D(D, x, y=y)
+        scores = gn.normalize_gradient_D(D, x, loss_fn, y=y)
     else:
         scores = D(x, y=y)
     scores_real, scores_fake = torch.split(scores, bs_D)
@@ -92,7 +97,7 @@ def train_D(
         for idx, img in enumerate(aug_real):
             aug_real[idx] = misc.cr_augment(img)
         if use_gn:
-            scores_aug = gn.normalize_gradient_D(D, aug_real, y=classes_real)
+            scores_aug = gn.normalize_gradient_D(D, aug_real, loss_fn, y=classes_real)
         else:
             scores_aug = D(aug_real, y=classes_real)
         loss_cr = (scores_aug - scores_real).square().mul(cr_gamma).mean()
@@ -104,23 +109,23 @@ def train_D(
 
 
 def train_G(
-    device,
-    loss_meter,
-    D,
-    G,
-    loss_fn,
-    gain,
-    bs_G: int,
-    n_classes: int,
-    z_dim: int,
-    use_gn: bool,
+    device,                 # torch device.
+    loss_meter,             # Meter for recording loss value.
+    D,                      # Discriminator.
+    G,                      # Generator.
+    loss_fn,                # Loss function.
+    gain,                   # Loss gain. Used for gradient accumulation.
+    bs_G: int,              # Batch size for G.
+    n_classes: int,         # Number of classes in the dataset.
+    z_dim: int,             # Dimension of latent space.
+    use_gn: bool,           # Whether to use gradient normalization.
     **kwargs,
 ):
     z = torch.randn(bs_G, z_dim, device=device)
     y = torch.randint(n_classes, (bs_G,), device=device)
     fake = G(z, y)
     if use_gn:
-        scores = gn.normalize_gradient_G(D, loss_fn, fake, y=y)
+        scores = gn.normalize_gradient_G(D, fake, loss_fn, y=y)
     else:
         scores = D(fake, y=y)
     loss_G = scores.mean()
@@ -130,46 +135,46 @@ def train_G(
 
 
 def training_loop(
-    rank: int,
-    num_gpus: int,
-    resume: bool,
-    logdir: str,
-    data_path: str,
-    hflip: bool,
-    resolution: int,
-    n_classes: int,
-    z_dim: int,
-    architecture_D: str,
-    architecture_G: str,
-    loss: str,
-    steps: int,
-    step_D: int,
-    bs_D: int,
-    bs_G: int,
-    lr_D: float,
-    lr_G: float,
-    lr_decay: bool,
-    accumulation: int,
-    beta0: float,
-    beta1: float,
-    cr_gamma: float,
-    gp_gamma: float,
-    use_gn: bool,
-    rescale_alpha: float,
-    ema_decay: float,
-    ema_start: int,
-    sample_step: int,
-    sample_size: int,
-    eval_step: int,
-    eval_size: int,
-    fid_stats: str,
-    save_step: int,
-    seed: int,
-    kwargs: dict,
+    rank: int,              # Rank of the current process in [0, num_gpus[.
+    num_gpus: int,          # Number of GPUs participating in the training.
+    resume: bool,           # Whether to resume training from a logdir.
+    logdir: str,            # Directory where to save the model and tf board.
+    data_path: str,         # Path to the dataset.
+    hflip: bool,            # Horizontal flip augmentation.
+    resolution: int,        # Resolution of the images.
+    n_classes: int,         # Number of classes in the dataset.
+    z_dim: int,             # Dimension of latent space.
+    architecture_D: str,    # Discriminator class path.
+    architecture_G: str,    # Generator class path.
+    loss: str,              # loss function class path.
+    steps: int,             # Total iteration of the training.
+    step_D: int,            # The number of iteration of the D per iteration of the G.
+    bs_D: int,              # Total batch size for one training iteration of D.
+    bs_G: int,              # Total batch size for one training iteration of G.
+    lr_D: float,            # Learning rate of the D.
+    lr_G: float,            # Learning rate of the G.
+    lr_decay: bool,         # Whether to linearly decay the learning rate.
+    accumulation: int,      # Number of gradient accumulation.
+    beta0: float,           # Beta0 of the Adam optimizer.
+    beta1: float,           # Beta1 of the Adam optimizer.
+    cr_gamma: float,        # Consistency regularization gamma.
+    gp_gamma: float,        # Gradient penalty gamma.
+    use_gn: bool,           # Whether to use gradient normalization.
+    rescale_alpha: float,   # Alpha parameter of the rescaling.
+    ema_decay: float,       # Decay rate of the exponential moving average.
+    ema_start: int,         # Start iteration of the exponential moving average.
+    sample_step: int,       # Sample from fixed z every sample_step iterations.
+    sample_size: int,       # Number of samples to generate.
+    eval_step: int,         # Evaluate the model every eval_step iterations.
+    eval_size: int,         # Number of images to evaluate.
+    fid_stats: str,         # Path to the FID statistics.
+    save_step: int,         # Save the model every save_step iterations.
+    seed: int,              # Seed for random number generators.
+    kwargs: dict,           # All arguments for dumping to the config file.
     **dummy,
 ):
-    assert bs_D % (accumulation * num_gpus) == 0, "The bs_D is not divisible by accumulation and num_gpus"
-    assert bs_G % (accumulation * num_gpus) == 0, "The bs_G is not divisible by accumulation and num_gpus"
+    assert bs_D % (accumulation * num_gpus) == 0, "bs_D is not divisible by accumulation and num_gpus"
+    assert bs_G % (accumulation * num_gpus) == 0, "bs_G is not divisible by accumulation and num_gpus"
     bs_D = bs_D // (accumulation * num_gpus)
     bs_G = bs_G // (accumulation * num_gpus)
     misc.set_seed(seed)
@@ -188,18 +193,18 @@ def training_loop(
     G = misc.construct_class(architecture_G, resolution, n_classes, z_dim).to(device)
     G_ema = copy.deepcopy(G)
 
+    # Initialize models for multi-gpu training.
     is_ddp = num_gpus > 1
     if is_ddp:
         D = torch.nn.SyncBatchNorm.convert_sync_batchnorm(D)
-        D = torch.nn.parallel.DistributedDataParallel(D, device_ids=[rank], output_device=rank)
+        D = torch.nn.parallel.DistributedDataParallel(
+            D, device_ids=[rank], output_device=rank)
         G = torch.nn.SyncBatchNorm.convert_sync_batchnorm(G)
-        G = torch.nn.parallel.DistributedDataParallel(G, device_ids=[rank], output_device=rank)
+        G = torch.nn.parallel.DistributedDataParallel(
+            G, device_ids=[rank], output_device=rank)
         G_ema = torch.nn.SyncBatchNorm.convert_sync_batchnorm(G_ema)
-        G_ema = torch.nn.parallel.DistributedDataParallel(G_ema, device_ids=[rank], output_device=rank)
-
-    D.requires_grad_(False)
-    G.requires_grad_(False)
-    G_ema.requires_grad_(False)
+        G_ema = torch.nn.parallel.DistributedDataParallel(
+            G_ema, device_ids=[rank], output_device=rank)
 
     # Initialize Optimizer.
     D_opt = torch.optim.Adam(D.parameters(), lr=lr_D, betas=[beta0, beta1])
@@ -210,9 +215,9 @@ def training_loop(
         end_factor = 0.0
     else:
         end_factor = 1.0
-    # pytorch version < 1.10
-    D_lrsched = misc.LinearLR(D_opt, end_factor, total_steps=steps)
-    G_lrsched = misc.LinearLR(G_opt, end_factor, total_steps=steps)
+    # pytorch version >= 1.10.0
+    D_lrsched = torch.optim.lr_scheduler.LinearLR(D_opt, 1.0, end_factor, total_iters=steps)
+    G_lrsched = torch.optim.lr_scheduler.LinearLR(G_opt, 1.0, end_factor, total_iters=steps)
 
     # Loss function for real and fake images.
     loss_fn = misc.construct_class(loss)
@@ -220,6 +225,7 @@ def training_loop(
     # tf board writer.
     if rank == 0:
         writer = SummaryWriter(logdir)
+        collector = misc.collect_forward_backward_norm(D)
 
     if not resume:
         # Sample fixed random noises and classes.
@@ -280,23 +286,38 @@ def training_loop(
                     D.module.rescale(alpha=rescale_alpha)
                 else:
                     D.rescale(alpha=rescale_alpha)
-            D_opt.zero_grad(set_to_none=True)
             for i in range(accumulation):
-                with misc.ddp_sync(D, i < accumulation - 1):
-                    train_D(device, loader, meter, D, G, loss_fn, gain=1 / accumulation, **kwargs)
+                with misc.ddp_sync(D, sync=(i == accumulation - 1)):
+                    train_D(device, loader, meter, D, G, loss_fn,
+                            gain=1 / accumulation, **kwargs)
             D_opt.step()
+            D_opt.zero_grad(set_to_none=True)
         D_lrsched.step()
         D.requires_grad_(False)
 
+        if rank == 0:
+            # Record the last forward and backward pass of D.
+            for tag, value in collector.norms():
+                writer.add_scalar(tag, value, step)
+
         # Update G.
         G.requires_grad_(True)
-        G_opt.zero_grad(set_to_none=True)
-        for _ in range(accumulation):
-            with misc.ddp_sync(G, i < accumulation - 1):
-                train_G(device, meter, D, G, loss_fn, gain=1 / accumulation, **kwargs)
+        for i in range(accumulation):
+            with misc.ddp_sync(G, sync=(i == accumulation - 1)):
+                train_G(device, meter, D, G, loss_fn,
+                        gain=1 / accumulation, **kwargs)
         G_opt.step()
+        G_opt.zero_grad(set_to_none=True)
         G_lrsched.step()
         G.requires_grad_(False)
+
+        # Update G_ema.
+        ema_beta = ema_decay if step > ema_start else 0
+        G_dict = G.state_dict()
+        G_ema_dict = G_ema.state_dict()
+        for name in G_dict.keys():
+            G_ema_dict[name].data.copy_(
+                G_ema_dict[name].data * ema_beta + G_dict[name].data * (1 - ema_beta))
 
         if rank == 0:
             # Update tf board
@@ -311,14 +332,7 @@ def training_loop(
                 f"G: {losses['loss/G']:.3f}",
             ]))
 
-        # Update G_ema.
-        ema_beta = ema_decay if step > ema_start else 0
-        G_dict = G.state_dict()
-        G_ema_dict = G_ema.state_dict()
-        for name in G_dict.keys():
-            G_ema_dict[name].data.copy_(G_ema_dict[name].data * ema_beta + G_dict[name].data * (1 - ema_beta))
-
-        # Generate images from fixed z
+        # Generate images from fixed z every sample_step steps.
         if step == 1 or step % sample_step == 0:
             with torch.no_grad():
                 imgs = G(fixed_z[rank], fixed_y[rank])
@@ -334,7 +348,7 @@ def training_loop(
                 writer.add_image('fake', make_grid(imgs), step)
                 writer.add_image('fake/ema', make_grid(imgs_ema), step)
 
-        # Calculate Inception Scores and FID
+        # Calculate FID every eval_step steps.
         if step == 1 or step % eval_step == 0:
             FID = fid(device, rank, num_gpus, G, **kwargs)
             FID_ema = fid(device, rank, num_gpus, G_ema, **kwargs)

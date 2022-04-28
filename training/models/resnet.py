@@ -142,18 +142,3 @@ class Discriminator(RescalableSequentialModel):
         x = x * 2 - 1
         y = self.main(x)
         return y
-
-
-if __name__ == '__main__':
-    for res in [32, 48, 128, 256]:
-        G = Generator(res, 1, 128)
-        param_count = 0
-        for param in G.parameters():
-            param_count += param.numel()
-        print('G(%d):' % res, param_count)
-
-        D = Discriminator(res, 1)
-        param_count = 0
-        for param in D.parameters():
-            param_count += param.numel()
-        print('D(%d):' % res, param_count)
