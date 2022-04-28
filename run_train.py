@@ -4,22 +4,19 @@ import tempfile
 import click
 import torch
 
-from training.training_loop import training_loop
+from training import training_loop
 from training import misc
 
 
 def subprocess_fn(rank, num_gpus, kwargs, temp_dir=None):
     if num_gpus > 1:
-        init_file = os.path.abspath(
-            os.path.join(temp_dir, '.torch_distributed_init'))
+        init_file = os.path.abspath(os.path.join(temp_dir, '.torch_distributed_init'))
         init_method = f'file://{init_file}'
-        torch.distributed.init_process_group(
-            backend='nccl', init_method=init_method,
-            rank=rank, world_size=num_gpus)
+        torch.distributed.init_process_group(backend='nccl', init_method=init_method, rank=rank, world_size=num_gpus)
         print("Node %d is initialized" % rank)
     torch.cuda.set_device(rank)
     torch.cuda.empty_cache()
-    training_loop(rank, num_gpus, kwargs=kwargs, **kwargs)
+    training_loop.training_loop(rank, num_gpus, kwargs=kwargs, **kwargs)
 
 
 @click.command(cls=misc.CommandAwareConfig('config'))
@@ -62,10 +59,15 @@ def main(**kwargs):
     if num_gpus == 1:
         subprocess_fn(0, num_gpus, kwargs)
     else:
-        torch.multiprocessing.set_start_method('spawn')
         with tempfile.TemporaryDirectory() as temp_dir:
-            torch.multiprocessing.spawn(
-                target=subprocess_fn, args=(num_gpus, kwargs, temp_dir), nprocs=num_gpus)
+            processes = []
+            for rank in range(num_gpus):
+                p = torch.multiprocessing.Process(
+                    target=subprocess_fn, args=(rank, num_gpus, kwargs, temp_dir))
+                p.start()
+                processes.append(p)
+            for p in processes:
+                p.join()
 
 
 if __name__ == '__main__':

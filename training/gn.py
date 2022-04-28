@@ -1,47 +1,63 @@
-from functools import partial
-
 import torch
-import torch.nn as nn
 
 
-def normalize_gradient_G(net_D, loss_fn, x, **kwargs):
-    def hook(grad, f, loss_fn):
+class Hook(object):
+    def __init__(self, f, loss_fn):
+        self.f = f[:, 0]        # [B, 1] -> [B]
+        self.loss_fn = loss_fn
+        self.handle = None
+
+    def set_handle(self, handle):
+        self.handle = handle
+
+    def loss_scale(self, grad_norm):
+        f_hat = self.f / (grad_norm + torch.abs(self.f))
+        with torch.enable_grad():
+            f_hat.requires_grad_(True)
+            loss = self.loss_fn(f_hat)
+            scale = torch.autograd.grad(loss, f_hat)[0] * self.f.shape[0]
+        return scale.view(-1, 1, 1, 1)
+
+    def grad_scale(self, grad_norm):
+        scale = grad_norm / ((grad_norm + torch.abs(self.f)) ** 2)
+        return scale.view(-1, 1, 1, 1)
+
+    def __call__(self, grad):
         """
-        This term is equivelent to grad_scale * grad
-                         ^
-                         |
-                      ~~~~~~
-        dL     dL     df_hat
-        -- = ------ x ------
-        dx   df_hat     dx
-             ~~~~~~
-                |
-                v
-        See losses.BaseLoss for details
+        dL     dL                1                df
+        -- = ------ x ----------------------- x ------
+        dx   df_hat   (|| df/dx || + | f |)^2     dx
+             ~~~~~~   ~~~~~~~~~~~~~~~~~~~~~~~   ~~~~~~
+               |                 |                |
+               v                 v                v
+           loss scale     gradient scale   original gradient
         """
         with torch.no_grad():
             grad_norm = torch.norm(
                 torch.flatten(grad, start_dim=1), p=2, dim=1) * grad.shape[0]
-            f = f[:, 0]
-            grad_scale = grad_norm / ((grad_norm + torch.abs(f)) ** 2)
-            grad_scale = grad_scale.view(-1, 1, 1, 1)
-            loss_scale = loss_fn.get_scale(f, grad_norm).view(-1, 1, 1, 1)
-            grad = loss_scale * grad_scale * grad
+            grad = self.loss_scale(grad_norm) * self.grad_scale(grad_norm) * grad
+        self.handle.remove()
         return grad
+
+
+def normalize_gradient_G(net_D, loss_fn, x, **kwargs):
     f = net_D(x, **kwargs)
-    # handle is used to remove hook after forward pass to prevent memory leak.
-    handle = x.register_hook(partial(hook, f=f, loss_fn=loss_fn))
-    return f, handle
+    # print(f)
+    hook = Hook(f, loss_fn)
+    handle = x.register_hook(hook)
+    hook.set_handle(handle)
+    return f
 
 
 def normalize_gradient_D(net_D, x, **kwargs):
     """
                      f
-    f_hat = --------------------
-            || grad_f || + | f |
+    f_hat = -------------------
+            || df/dx || + | f |
     """
     x.requires_grad_(True)
     f = net_D(x, **kwargs)
+    # print(f)
     grad = torch.autograd.grad(
         f, [x], torch.ones_like(f), create_graph=True, retain_graph=True)[0]
     grad_norm = torch.norm(torch.flatten(grad, start_dim=1), p=2, dim=1)

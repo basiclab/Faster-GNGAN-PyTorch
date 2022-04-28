@@ -3,11 +3,10 @@ import json
 import os
 
 import torch
-from tqdm import trange, tqdm
+from pytorch_gan_metrics import get_fid
 from tensorboardX import SummaryWriter
 from torchvision.utils import make_grid
-from pytorch_gan_metrics import get_fid
-
+from tqdm import trange, tqdm
 
 from training import datasets
 from training import misc
@@ -26,27 +25,29 @@ def fid(
     fid_stats: str,
     **kwargs
 ):
-    eval_imgs = []
-    progress = tqdm(total=eval_size, ncols=0, desc="Generating", leave=False)
+    imgs = []
+    progress = tqdm(total=eval_size, ncols=0, desc="Generating", leave=False, disable=rank != 0)
     for i in range(0, eval_size, bs_G):
         bs = min(bs_G, eval_size - i)
         z = torch.randn(bs, z_dim, device=device)
         y = torch.randint(n_classes, (bs,), device=device)
         with torch.no_grad():
-            imgs = G(z, y)
+            batch_imgs = G(z, y)
         if num_gpus > 1:
-            buf = [torch.empty_like(imgs) for _ in range(num_gpus)]
-            torch.distributed.all_gather(buf, imgs)
-            imgs = torch.cat(buf, dim=0).cpu()
-        eval_imgs.append(imgs)
+            buf = [torch.empty_like(batch_imgs) for _ in range(num_gpus)]
+            torch.distributed.all_gather(buf, batch_imgs)
+            batch_imgs = torch.cat(buf, dim=0).cpu()
+        imgs.append(batch_imgs)
         progress.update(bs)
     progress.close()
     if rank == 0:
-        FID = get_fid(torch.cat(eval_imgs, dim=0), fid_stats, verbose=True)
+        imgs = torch.cat(imgs, dim=0)[:eval_size]
+        FID = get_fid(imgs, fid_stats, verbose=True)
     else:
         FID = None
     if num_gpus > 1:
         torch.distributed.barrier()
+    del imgs
     return FID
 
 
@@ -119,13 +120,11 @@ def train_G(
     y = torch.randint(n_classes, (bs_G,), device=device)
     fake = G(z, y)
     if use_gn:
-        scores, handle = gn.normalize_gradient_G(D, loss_fn, fake, y=y)
+        scores = gn.normalize_gradient_G(D, loss_fn, fake, y=y)
     else:
         scores = D(fake, y=y)
     loss_G = scores.mean()
     loss_G.mul(gain).backward()
-    if use_gn:
-        handle.remove()
 
     loss_meter.append('loss/G', loss_G.detach().cpu())
 
@@ -186,16 +185,21 @@ def training_loop(
 
     # Construct Models.
     D = misc.construct_class(architecture_D, resolution, n_classes).to(device)
-    D.requires_grad_(False)
     G = misc.construct_class(architecture_G, resolution, n_classes, z_dim).to(device)
-    G.requires_grad_(False)
     G_ema = copy.deepcopy(G)
 
     is_ddp = num_gpus > 1
     if is_ddp:
+        D = torch.nn.SyncBatchNorm.convert_sync_batchnorm(D)
         D = torch.nn.parallel.DistributedDataParallel(D, device_ids=[rank], output_device=rank)
+        G = torch.nn.SyncBatchNorm.convert_sync_batchnorm(G)
         G = torch.nn.parallel.DistributedDataParallel(G, device_ids=[rank], output_device=rank)
+        G_ema = torch.nn.SyncBatchNorm.convert_sync_batchnorm(G_ema)
         G_ema = torch.nn.parallel.DistributedDataParallel(G_ema, device_ids=[rank], output_device=rank)
+
+    D.requires_grad_(False)
+    G.requires_grad_(False)
+    G_ema.requires_grad_(False)
 
     # Initialize Optimizer.
     D_opt = torch.optim.Adam(D.parameters(), lr=lr_D, betas=[beta0, beta1])
@@ -294,17 +298,18 @@ def training_loop(
         G_lrsched.step()
         G.requires_grad_(False)
 
-        # Update tf board
-        losses = meter.todict()
-        for tag, value in losses.items():
-            writer.add_scalar(tag, value, step)
+        if rank == 0:
+            # Update tf board
+            losses = meter.todict()
+            for tag, value in losses.items():
+                writer.add_scalar(tag, value, step)
 
-        # Update progress bar
-        progress.set_postfix_str(", ".join([
-            f"D_fake: {losses['loss/D/fake']:.3f}",
-            f"D_real: {losses['loss/D/real']:.3f}",
-            f"G: {losses['loss/G']:.3f}",
-        ]))
+            # Update progress bar
+            progress.set_postfix_str(", ".join([
+                f"D_fake: {losses['loss/D/fake']:.3f}",
+                f"D_real: {losses['loss/D/real']:.3f}",
+                f"G: {losses['loss/G']:.3f}",
+            ]))
 
         # Update G_ema.
         ema_beta = ema_decay if step > ema_start else 0

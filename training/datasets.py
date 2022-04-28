@@ -15,7 +15,7 @@ class Dataset(torch.utils.data.Dataset):
         self.transform = transforms.Compose(transform)
 
         self.env = lmdb.open(
-            path, max_readers=1, readonly=True, lock=False, readahead=False,
+            path, max_readers=32, readonly=True, lock=False, readahead=False,
             meminit=False)
         with self.env.begin(write=False) as txn:
             self.length = txn.stat()['entries'] // 2    # image + label
