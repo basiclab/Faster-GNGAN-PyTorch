@@ -29,3 +29,5 @@ figures
 
 # test scripts
 *.sh
+tools
+!indocker.sh
