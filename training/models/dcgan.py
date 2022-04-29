@@ -32,7 +32,7 @@ class Generator(nn.Module):
             nn.Tanh())
 
         for m in self.modules():
-            if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+            if isinstance(m, (nn.ConvTranspose2d, nn.Linear)):
                 torch.nn.init.normal_(m.weight, std=0.02)
                 torch.nn.init.zeros_(m.bias)
 

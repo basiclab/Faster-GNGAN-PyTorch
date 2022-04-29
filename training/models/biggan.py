@@ -126,7 +126,7 @@ class Generator(nn.Module):
             if i in attn_indices:
                 blocks.append(
                     Attention(channels[i], use_spectral_norm=True))
-        self.blocks.extend([
+        blocks.extend([
             nn.BatchNorm2d(channels[-1]),
             nn.ReLU(inplace=True),
             sn(nn.Conv2d(channels[-1], 3, 3, padding=1)),

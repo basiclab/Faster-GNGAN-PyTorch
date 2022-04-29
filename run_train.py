@@ -8,17 +8,6 @@ from training import training_loop
 from training import misc
 
 
-def subprocess_fn(rank, num_gpus, kwargs, temp_dir=None):
-    if num_gpus > 1:
-        init_file = os.path.abspath(os.path.join(temp_dir, '.torch_distributed_init'))
-        init_method = f'file://{init_file}'
-        torch.distributed.init_process_group(backend='nccl', init_method=init_method, rank=rank, world_size=num_gpus)
-        print("Node %d is initialized" % rank)
-    torch.cuda.set_device(rank)
-    torch.cuda.empty_cache()
-    training_loop.training_loop(rank, num_gpus, kwargs=kwargs, **kwargs)
-
-
 @click.command(cls=misc.CommandAwareConfig('config'))
 @click.option('--config', default=None, type=str)
 @click.option('--resume/--no-resume', default=False)
@@ -68,6 +57,17 @@ def main(**kwargs):
                 processes.append(p)
             for p in processes:
                 p.join()
+
+
+def subprocess_fn(rank, num_gpus, kwargs, temp_dir=None):
+    if num_gpus > 1:
+        init_file = os.path.abspath(os.path.join(temp_dir, '.torch_distributed_init'))
+        init_method = f'file://{init_file}'
+        torch.distributed.init_process_group(backend='nccl', init_method=init_method, rank=rank, world_size=num_gpus)
+        print("Node %d is initialized" % rank)
+    torch.cuda.set_device(rank)
+    torch.cuda.empty_cache()
+    training_loop.training_loop(rank, num_gpus, kwargs=kwargs, **kwargs)
 
 
 if __name__ == '__main__':
