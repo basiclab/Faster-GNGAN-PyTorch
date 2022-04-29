@@ -40,7 +40,7 @@ class Hook(object):
         return grad
 
 
-def normalize_gradient_G(net_D, x, loss_fn, **kwargs):
+def normalize_G(net_D, x, loss_fn, **kwargs):
     f = net_D(x, **kwargs)
     hook = Hook(f, loss_fn)
     handle = x.register_hook(hook)
@@ -48,7 +48,7 @@ def normalize_gradient_G(net_D, x, loss_fn, **kwargs):
     return f
 
 
-def normalize_gradient_D(net_D, x, loss_fn, **kwargs):
+def normalize_D(net_D, x, loss_fn, **kwargs):
     """
                      f
     f_hat = -------------------
@@ -56,10 +56,7 @@ def normalize_gradient_D(net_D, x, loss_fn, **kwargs):
     """
     x.requires_grad_(True)
     f = net_D(x, **kwargs)
-    # print(f)
-    grad = torch.autograd.grad(
-        f, [x], torch.ones_like(f), create_graph=True, retain_graph=True)[0]
-    grad_norm = torch.norm(torch.flatten(grad, start_dim=1), p=2, dim=1)
-    grad_norm = grad_norm.view(-1, 1)
-    f_hat = (f / (grad_norm + torch.abs(f)))
+    grad = torch.autograd.grad(f, x, torch.ones_like(f), create_graph=True)[0]
+    grad_norm = grad.flatten(start_dim=1).norm(dim=1).view(-1, 1)
+    f_hat = f / (grad_norm + torch.abs(f))
     return f_hat

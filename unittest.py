@@ -116,14 +116,14 @@ def test_loss():
                 x.retain_grad()
 
                 D1.zero_grad()
-                y1 = gn.normalize_gradient_D(D1, x, y=y)
+                y1 = gn.normalize_D(D1, x, y=y)
                 loss = loss_fn(y1)
                 loss.backward()
                 grad1 = x.grad.detach().clone()
                 x.grad.zero_()
 
                 D2.zero_grad()
-                y2 = gn.normalize_gradient_G(D2, loss_fn, x, y=y)
+                y2 = gn.normalize_G(D2, loss_fn, x, y=y)
                 loss = y2.mean()
                 loss.backward()
                 grad2 = x.grad.detach().clone()

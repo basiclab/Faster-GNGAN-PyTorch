@@ -3,9 +3,9 @@ import json
 import os
 
 import torch
+import torchvision
 from pytorch_gan_metrics import get_fid
 from tensorboardX import SummaryWriter
-from torchvision.utils import make_grid
 from tqdm import trange, tqdm
 
 from training import datasets
@@ -81,7 +81,7 @@ def train_D(
     x = torch.cat([images_real, images_fake], dim=0)
     y = torch.cat([classes_real, classes_fake], dim=0)
     if use_gn:
-        scores = gn.normalize_gradient_D(D, x, loss_fn, y=y)
+        scores = gn.normalize_D(D, x, loss_fn, y=y)
     else:
         scores = D(x, y=y)
     scores_real, scores_fake = torch.split(scores, bs_D)
@@ -97,7 +97,7 @@ def train_D(
         for idx, img in enumerate(aug_real):
             aug_real[idx] = misc.cr_augment(img)
         if use_gn:
-            scores_aug = gn.normalize_gradient_D(D, aug_real, loss_fn, y=classes_real)
+            scores_aug = gn.normalize_D(D, aug_real, loss_fn, y=classes_real)
         else:
             scores_aug = D(aug_real, y=classes_real)
         loss_cr = (scores_aug - scores_real).square().mul(cr_gamma).mean()
@@ -125,7 +125,7 @@ def train_G(
     y = torch.randint(n_classes, (bs_G,), device=device)
     fake = G(z, y)
     if use_gn:
-        scores = gn.normalize_gradient_G(D, fake, loss_fn, y=y)
+        scores = gn.normalize_G(D, fake, loss_fn, y=y)
     else:
         scores = D(fake, y=y)
     loss_G = scores.mean()
@@ -244,7 +244,7 @@ def training_loop(
             with open(os.path.join(logdir, "config.json"), 'w') as f:
                 json.dump(kwargs, f, indent=2, sort_keys=True)
             samples = [dataset[i][0] for i in range(sample_size)]
-            writer.add_image('real', make_grid(samples))
+            writer.add_image('real', torchvision.utils.make_grid(samples))
             writer.flush()
     else:
         ckpt = torch.load(os.path.join(logdir, 'model.pt'), map_location='cpu')
@@ -345,8 +345,8 @@ def training_loop(
                 imgs = torch.cat(buf, dim=0).cpu()
                 imgs_ema = torch.cat(buf_ema, dim=0).cpu()
             if rank == 0:
-                writer.add_image('fake', make_grid(imgs), step)
-                writer.add_image('fake/ema', make_grid(imgs_ema), step)
+                writer.add_image('fake', torchvision.utils.make_grid(imgs), step)
+                writer.add_image('fake/ema', torchvision.utils.make_grid(imgs_ema), step)
 
         # Calculate FID every eval_step steps.
         if step == 1 or step % eval_step == 0:
