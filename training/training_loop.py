@@ -14,15 +14,15 @@ from training import gn
 
 
 def fid(
-    device,
-    rank,
-    num_gpus,
-    G,
-    bs_G: int,
-    z_dim: int,
-    n_classes: int,
-    eval_size: int,
-    fid_stats: str,
+    device,                 # torch device.
+    rank,                   # Rank of the current process in [0, num_gpus[.
+    num_gpus,               # Number of GPUs participating in the training.
+    G,                      # Generator.
+    bs_G: int,              # Batch size for G.
+    z_dim: int,             # Dimension of latent space.
+    n_classes: int,         # Number of classes in the dataset.
+    eval_size: int,         # Number of images to evaluate.
+    fid_stats: str,         # Path to the FID statistics.
     **kwargs
 ):
     imgs = []
@@ -77,7 +77,7 @@ def train_D(
     z = torch.randn(bs_D, z_dim, device=device)
     classes_fake = torch.randint(n_classes, (bs_D,), device=device)
     with torch.no_grad():
-        images_fake = G(z, classes_fake).detach()
+        images_fake = G(z, classes_fake)
     x = torch.cat([images_real, images_fake], dim=0)
     y = torch.cat([classes_real, classes_fake], dim=0)
     if use_gn:
@@ -93,15 +93,16 @@ def train_D(
 
     # Consistency Regularization.
     if cr_gamma != 0:
-        aug_real = images_real.detach().clone()
-        for idx, img in enumerate(aug_real):
-            aug_real[idx] = misc.cr_augment(img)
+        images_aug = images_real.detach().clone().cpu()
+        for idx, img in enumerate(images_aug):
+            images_aug[idx] = misc.cr_augment(img)
+        images_aug = images_aug.to(images_real.device)
         if use_gn:
-            scores_aug = gn.normalize_D(D, aug_real, loss_fn, y=classes_real)
+            scores_aug = gn.normalize_D(D, images_aug, loss_fn, y=classes_real)
         else:
-            scores_aug = D(aug_real, y=classes_real)
-        loss_cr = (scores_aug - scores_real).square().mul(cr_gamma).mean()
-        loss_D += loss_cr
+            scores_aug = D(images_aug, y=classes_real)
+        loss_cr = (scores_aug - scores_real).square().mean()
+        loss_D += loss_cr.mul(cr_gamma)
         loss_meter.append('loss/D/cr', loss_cr.detach().cpu())
 
     # Backward.

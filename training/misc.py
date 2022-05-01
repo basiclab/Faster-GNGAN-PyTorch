@@ -123,8 +123,12 @@ class Meter:
 
 
 cr_augment = torchvision.transforms.Compose([
-    torchvision.transforms.RandomHorizontalFlip(p=0.5),
+    torchvision.transforms.Lambda(lambda x: (x + 1) / 2),
+    torchvision.transforms.ToPILImage(mode='RGB'),
+    torchvision.transforms.RandomHorizontalFlip(),
     torchvision.transforms.RandomAffine(0, translate=(0.2, 0.2)),
+    torchvision.transforms.ToTensor(),
+    torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
 ])
 
 
