@@ -32,10 +32,9 @@ def fid(
         desc="Generating",
         leave=False,
         disable=rank != 0)
-    for i in range(0, eval_size, bs_G):
-        bs = min(bs_G, eval_size - i)
-        z = torch.randn(bs, z_dim, device=device)
-        y = torch.randint(n_classes, (bs,), device=device)
+    for _ in range(0, eval_size, bs_G * num_gpus):
+        z = torch.randn(bs_G, z_dim, device=device)
+        y = torch.randint(n_classes, (bs_G,), device=device)
         with torch.no_grad():
             batch_imgs = G(z, y)
         if num_gpus > 1:
@@ -43,10 +42,11 @@ def fid(
             torch.distributed.all_gather(buf, batch_imgs)
             batch_imgs = torch.cat(buf, dim=0).cpu()
         imgs.append(batch_imgs)
-        progress.update(bs)
+        progress.update(bs_G * num_gpus)
     progress.close()
     if rank == 0:
         imgs = torch.cat(imgs, dim=0)[:eval_size]
+        assert len(imgs) == eval_size
         FID = get_fid(imgs, fid_stats, verbose=True)
     else:
         FID = None
@@ -177,7 +177,7 @@ def training_loop(
     assert bs_G % (accumulation * num_gpus) == 0, "bs_G is not divisible by accumulation and num_gpus"
     bs_D = bs_D // (accumulation * num_gpus)
     bs_G = bs_G // (accumulation * num_gpus)
-    misc.set_seed(seed)
+    misc.set_seed(rank + seed)
 
     device = torch.device('cuda:%d' % rank)
     dataset = datasets.Dataset(data_path, resolution, hflip)
@@ -196,7 +196,6 @@ def training_loop(
     # Initialize models for multi-gpu training.
     is_ddp = num_gpus > 1
     if is_ddp:
-        D = torch.nn.SyncBatchNorm.convert_sync_batchnorm(D)
         D = torch.nn.parallel.DistributedDataParallel(
             D, device_ids=[rank], output_device=rank)
         G = torch.nn.SyncBatchNorm.convert_sync_batchnorm(G)
