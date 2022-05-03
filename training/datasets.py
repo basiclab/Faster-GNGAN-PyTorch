@@ -1,18 +1,24 @@
 import io
+import os
+from glob import glob
 
+import click
 import lmdb
 import torch
+import torchvision
 from PIL import Image
-from torchvision import transforms
+from tqdm import tqdm
 
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, path, resolution, hflip):
-        transform = [transforms.Resize((resolution, resolution))]
+        transform = [
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Resize((resolution, resolution))
+        ]
         if hflip:
-            transform.append(transforms.RandomHorizontalFlip(p=0.5))
-        transform.append(transforms.ToTensor())
-        self.transform = transforms.Compose(transform)
+            transform.append(torchvision.transforms.RandomHorizontalFlip(p=0.5))
+        self.transform = torchvision.transforms.Compose(transform)
 
         self.env = lmdb.open(
             path, max_readers=32, readonly=True, lock=False, readahead=False,
@@ -74,65 +80,67 @@ class InfiniteSampler(torch.utils.data.Sampler):
             idx += 1
 
 
-if __name__ == '__main__':
-    import argparse
-    import os
-    from glob import glob
-    from tqdm import tqdm
+@click.command()
+@click.option('-d', '--dataset', type=str, required=True,
+              help='If `--dataset cifar10` or `--dataset stl10` is used, '
+                   'the dataset will be automatically downloaded. Otherwise, '
+                   'the path to the root of dataset must be specified.')
+@click.option('-o', '--output', type=str, required=True,
+              help='Path to the output directory.')
+def files_to_lmdb(dataset, output):
 
-    import torchvision
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--dataset', choices=['cifar10', 'stl10'], default=None)
-    parser.add_argument(
-        '--path', type=str, default=None)
-    parser.add_argument(
-        '--out', type=str, required=True)
-    args = parser.parse_args()
-
-    if args.dataset is None and args.path is None:
-        print('one of --dataset or --path must be specified')
-
-    if args.dataset:
-        if args.dataset == 'cifar10':
-            dataset = torchvision.datasets.CIFAR10(
+    if dataset in ['cifar10', 'stl10']:
+        if dataset == 'cifar10':
+            pt_dataset = torchvision.datasets.CIFAR10(
                 root='/tmp', train=True, download=True)
-        if args.dataset == 'stl10':
-            dataset = torchvision.datasets.STL10(
+        if dataset == 'stl10':
+            pt_dataset = torchvision.datasets.STL10(
                 root='/tmp', split='unlabeled', download=True)
-        with lmdb.open(args.out, map_size=1024 ** 4, readahead=False) as env:
-            with env.begin(write=True) as txn:
-                for i, (img, y) in enumerate(tqdm(dataset, ncols=0)):
-                    dkey = f'd{i}'.encode()
-                    lkey = f'l{i}'.encode()
-                    # image to bytes
-                    buf = io.BytesIO()
-                    img.save(buf, format='PNG')
-                    img = buf.getvalue()
-                    # class to bytes
-                    cls = str(y).encode()
-                    # write to db
-                    txn.put(dkey, img)
-                    txn.put(lkey, cls)
+        env = lmdb.open(output, map_size=1024 ** 4, readahead=False)
+        with env.begin(write=True) as txn:
+            for i, (img, y) in enumerate(tqdm(pt_dataset, ncols=0)):
+                dkey = f'd{i}'.encode()
+                lkey = f'l{i}'.encode()
+                # image to bytes
+                buf = io.BytesIO()
+                img.save(buf, format='PNG')
+                img = buf.getvalue()
+                # class to bytes
+                cls = str(y).encode()
+                # write to db
+                txn.put(dkey, img)
+                txn.put(lkey, cls)
     else:
-        with lmdb.open(args.out, map_size=1024 ** 4, readahead=False) as env:
-            with env.begin(write=True) as txn:
-                files = []
-                files.extend(
-                    glob(os.path.join(args.path, '**/*.jpg'), recursive=True))
-                files.extend(
-                    glob(os.path.join(args.path, '**/*.JPEG'), recursive=True))
-                files.extend(
-                    glob(os.path.join(args.path, '**/*.png'), recursive=True))
-                files = sorted(files)
-                for i, file in enumerate(tqdm(files, ncols=0)):
-                    dkey = f'd{i}'.encode()
-                    lkey = f'l{i}'.encode()
-                    # image to bytes
-                    img = open(file, 'rb').read()
-                    # class to bytes
-                    cls = "0".encode()
-                    # write to db
-                    txn.put(dkey, img)
-                    txn.put(lkey, cls)
+        exts = ["JPEG", "jpg", "PNG", "png"]
+        files_in_subdir = []
+        files_in_curdir = []
+        for ext in exts:
+            files_in_subdir.extend(glob(os.path.join(dataset, f'*/*.{ext}')))
+            files_in_curdir.extend(glob(os.path.join(dataset, f'*.{ext}')))
+        files_in_subdir = sorted(files_in_subdir)
+        files_in_curdir = sorted(files_in_curdir)
+        if len(files_in_subdir) > 0:
+            subdirs = set(os.path.basename(os.path.dirname(f)) for f in files_in_subdir)
+            dir2cls = {d: i for i, d in enumerate(subdirs)}
+            files = files_in_subdir
+        else:
+            assert len(files_in_curdir) > 0, 'No files found in the specified path.'
+            dir2cls = {os.path.basename(os.path.dirname(files_in_curdir[0])): 0}
+            files = files_in_curdir
+        env = lmdb.open(output, map_size=1024 ** 4, readahead=False)
+        with env.begin(write=True) as txn:
+            for i, file in enumerate(tqdm(files, ncols=0)):
+                dir = os.path.basename(os.path.dirname(file))
+                dkey = f'd{i}'.encode()
+                lkey = f'l{i}'.encode()
+                # image to bytes
+                img = open(file, 'rb').read()
+                # class to bytes
+                cls = str(dir2cls[dir]).encode()
+                # write to db
+                txn.put(dkey, img)
+                txn.put(lkey, cls)
+
+
+if __name__ == '__main__':
+    files_to_lmdb()
