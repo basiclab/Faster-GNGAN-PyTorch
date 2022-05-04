@@ -6,7 +6,6 @@ import random
 import click
 import numpy as np
 import torch
-import torchvision
 
 
 def CommandAwareConfig(config_param_name):
@@ -120,34 +119,3 @@ class Meter:
             name: torch.mean(torch.stack(value_lst))
             for name, value_lst in self.name2list.items()
         }
-
-
-cr_augment = torchvision.transforms.Compose([
-    torchvision.transforms.Lambda(lambda x: (x + 1) / 2),
-    torchvision.transforms.ToPILImage(mode='RGB'),
-    torchvision.transforms.RandomHorizontalFlip(),
-    torchvision.transforms.RandomAffine(0, translate=(0.2, 0.2)),
-    torchvision.transforms.ToTensor(),
-    torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-])
-
-
-if __name__ == '__main__':
-    from .models import resnet
-
-    torch.manual_seed(0)
-    torch.cuda.manual_seed(0)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-    m = resnet.Discriminator(32, 1)
-    collector = collect_forward_backward_norm(m)
-    x = torch.randn(1, 3, 32, 32, requires_grad=True)
-    y = m(x)
-    grad = torch.autograd.grad(y.sum(), x, create_graph=True)[0]
-    y = y.div(grad.flatten(1).norm(dim=1).add(y.norm(dim=1)).square())
-    y = y.sum()
-    print("====")
-    y.sum().backward()
-    for tag, norm in collector.norms():
-        print(tag, norm)

@@ -135,5 +135,5 @@ def test_loss():
 
 
 if __name__ == '__main__':
-    # test_model_rescaling()
+    test_model_rescaling()
     test_loss()

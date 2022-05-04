@@ -7,24 +7,39 @@ import lmdb
 import torch
 import torchvision
 from PIL import Image
+from torchvision import transforms as T
 from tqdm import tqdm
 
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, path, resolution, hflip):
-        transform = [
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Resize((resolution, resolution))
-        ]
-        if hflip:
-            transform.append(torchvision.transforms.RandomHorizontalFlip(p=0.5))
-        self.transform = torchvision.transforms.Compose(transform)
+    def __init__(
+        self,
+        path,           # Path to the dataset.
+        hflip,          # Horizontal flip augmentation.
+        resolution,     # Resolution of the images.
+        apply_cr,       # Consistency regularization gamma.
+    ):
+        self.apply_cr = apply_cr
+        if self.apply_cr:
+            self.cr_transform = T.Compose([
+                T.ToTensor(),
+                T.Lambda(lambda x: torch.clamp(
+                    x + torch.randint_like(x, 0, 2) / 255, min=0, max=1
+                )),
+                T.RandomHorizontalFlip(),
+                T.RandomAffine(0, translate=(0.2, 0.2)),
+            ])
+        self.transform = T.Compose([
+            T.Resize((resolution, resolution)),
+            T.RandomHorizontalFlip(p=0.5) if hflip else T.Compose([]),
+            T.ToTensor(),
+        ])
 
         self.env = lmdb.open(
             path, max_readers=32, readonly=True, lock=False, readahead=False,
             meminit=False)
         with self.env.begin(write=False) as txn:
-            self.length = txn.stat()['entries'] // 2    # image + label
+            self.length = txn.stat()['entries'] // 2    # #image + #label
 
     def __len__(self):
         return self.length
@@ -33,7 +48,6 @@ class Dataset(torch.utils.data.Dataset):
         with self.env.begin(write=False) as txn:
             img = txn.get(f'd{index}'.encode())
             cls = txn.get(f'l{index}'.encode())
-
         # decode image
         buf = io.BytesIO()
         buf.write(img)
@@ -42,8 +56,12 @@ class Dataset(torch.utils.data.Dataset):
         # decode class
         cls = int(cls.decode())
 
+        if self.apply_cr is not None:
+            img_aug = self.cr_transform(img)
+        else:
+            img_aug = None
         img = self.transform(img)
-        return img, cls
+        return img, cls, img_aug
 
 
 class InfiniteSampler(torch.utils.data.Sampler):
@@ -86,7 +104,7 @@ class InfiniteSampler(torch.utils.data.Sampler):
                    'the dataset will be automatically downloaded. Otherwise, '
                    'the path to the root of dataset must be specified.')
 @click.option('-o', '--output', type=str, required=True,
-              help='Path to the output directory.')
+              help='Path to the output lmdb.')
 def files_to_lmdb(dataset, output):
 
     if dataset in ['cifar10', 'stl10']:
@@ -96,20 +114,21 @@ def files_to_lmdb(dataset, output):
         if dataset == 'stl10':
             pt_dataset = torchvision.datasets.STL10(
                 root='/tmp', split='unlabeled', download=True)
-        env = lmdb.open(output, map_size=1024 ** 4, readahead=False)
-        with env.begin(write=True) as txn:
-            for i, (img, y) in enumerate(tqdm(pt_dataset, ncols=0)):
-                dkey = f'd{i}'.encode()
-                lkey = f'l{i}'.encode()
-                # image to bytes
-                buf = io.BytesIO()
-                img.save(buf, format='PNG')
-                img = buf.getvalue()
-                # class to bytes
-                cls = str(y).encode()
-                # write to db
-                txn.put(dkey, img)
-                txn.put(lkey, cls)
+        os.makedirs(os.path.dirname(output), exist_ok=True)
+        with lmdb.open(output, map_size=1024 ** 4, readahead=False) as env:
+            with env.begin(write=True) as txn:
+                for i, (img, y) in enumerate(tqdm(pt_dataset, ncols=0)):
+                    dkey = f'd{i}'.encode()
+                    lkey = f'l{i}'.encode()
+                    # image to bytes
+                    buf = io.BytesIO()
+                    img.save(buf, format='PNG')
+                    img = buf.getvalue()
+                    # class to bytes
+                    cls = str(y).encode()
+                    # write to db
+                    txn.put(dkey, img)
+                    txn.put(lkey, cls)
     else:
         exts = ["JPEG", "jpg", "PNG", "png"]
         files_in_subdir = []
@@ -127,19 +146,20 @@ def files_to_lmdb(dataset, output):
             assert len(files_in_curdir) > 0, 'No files found in the specified path.'
             dir2cls = {os.path.basename(os.path.dirname(files_in_curdir[0])): 0}
             files = files_in_curdir
-        env = lmdb.open(output, map_size=1024 ** 4, readahead=False)
-        with env.begin(write=True) as txn:
-            for i, file in enumerate(tqdm(files, ncols=0)):
-                dir = os.path.basename(os.path.dirname(file))
-                dkey = f'd{i}'.encode()
-                lkey = f'l{i}'.encode()
-                # image to bytes
-                img = open(file, 'rb').read()
-                # class to bytes
-                cls = str(dir2cls[dir]).encode()
-                # write to db
-                txn.put(dkey, img)
-                txn.put(lkey, cls)
+        os.makedirs(os.path.dirname(output), exist_ok=True)
+        with lmdb.open(output, map_size=1024 ** 4, readahead=False) as env:
+            with env.begin(write=True) as txn:
+                for i, file in enumerate(tqdm(files, ncols=0)):
+                    dir = os.path.basename(os.path.dirname(file))
+                    dkey = f'd{i}'.encode()
+                    lkey = f'l{i}'.encode()
+                    # image to bytes
+                    img = open(file, 'rb').read()
+                    # class to bytes
+                    cls = str(dir2cls[dir]).encode()
+                    # write to db
+                    txn.put(dkey, img)
+                    txn.put(lkey, cls)
 
 
 if __name__ == '__main__':

@@ -59,17 +59,17 @@ class RescalableResBlock(Rescalable):
 
 
 class RescalableWrapper(Rescalable):
+
     def __init__(self, module: nn.Module):
         super().__init__()
         self.module = module
-        assert 'weight' in module._parameters
 
     def init_module(self):
         """Must be called after parameter initialization"""
-        if 'weight' in self.module._parameters:
-            self._init_param('weight')
-        if 'bias' in self.module._parameters:
-            self._init_param('bias')
+        for name in ['weight', 'bias']:
+            if name in self.module._parameters:
+                self._init_param(name)
+        self.module.register_forward_pre_hook(RescalableWrapper.hook)
 
     def _init_param(self, name):
         params = self.module._parameters[name]
@@ -89,10 +89,20 @@ class RescalableWrapper(Rescalable):
             self.module.bias_scale = base_scale
         return base_scale
 
-    def forward(self, *args, **kwargs):
+    @staticmethod
+    def hook(module, inputs):
         for name in ['weight', 'bias']:
-            if f"{name}_raw" in self.module._parameters:
-                param = self.module._parameters[f"{name}_raw"]
-                scale = self.module._buffers[f'{name}_scale']
-                setattr(self.module, name, param * scale)
+            if f"{name}_raw" in module._parameters:
+                param = module._parameters[f"{name}_raw"]
+                scale = module._buffers[f'{name}_scale']
+                # we need to **clone** the scale before using them to rescale
+                # the weight. This is to support backproping through two
+                # forward passes, e.g., the common pattern in GAN training:
+                # loss = D(real) - D(fake). Otherwise, engine will complain
+                # that variables needed to do backward for the first forward (
+                # i.e., the `weight_scale` and `bias_scale`) are changed in the
+                # second forward.
+                setattr(module, name, param * scale.clone())
+
+    def forward(self, *args, **kwargs):
         return self.module(*args, **kwargs)

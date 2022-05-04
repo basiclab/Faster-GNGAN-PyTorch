@@ -72,7 +72,7 @@ def train_D(
     use_gn: bool,           # Whether to use gradient normalization.
     **kwargs,
 ):
-    images_real, classes_real = next(loader)
+    images_real, classes_real, images_aug = next(loader)
     images_real, classes_real = images_real.to(device), classes_real.to(device)
     z = torch.randn(bs_D, z_dim, device=device)
     classes_fake = torch.randint(n_classes, (bs_D,), device=device)
@@ -92,11 +92,8 @@ def train_D(
     loss_meter.append('loss/D/fake', loss_fake.detach().cpu())
 
     # Consistency Regularization.
-    if cr_gamma != 0:
-        images_aug = images_real.detach().clone().cpu()
-        for idx, img in enumerate(images_aug):
-            images_aug[idx] = misc.cr_augment(img)
-        images_aug = images_aug.to(images_real.device)
+    if cr_gamma > 0:
+        images_aug = images_aug.to(device)
         if use_gn:
             scores_aug = gn.normalize_D(D, images_aug, loss_fn, y=classes_real)
         else:
@@ -181,7 +178,7 @@ def training_loop(
     misc.set_seed(rank + seed)
 
     device = torch.device('cuda:%d' % rank)
-    dataset = datasets.Dataset(data_path, resolution, hflip)
+    dataset = datasets.Dataset(data_path, hflip, resolution, cr_gamma > 0)
     sampler = datasets.InfiniteSampler(dataset, rank, num_gpus, seed=seed)
     loader = iter(torch.utils.data.DataLoader(
         dataset=dataset,
