@@ -22,12 +22,12 @@ class Dataset(torch.utils.data.Dataset):
         self.apply_cr = apply_cr
         if self.apply_cr:
             self.cr_transform = T.Compose([
-                T.ToTensor(),
-                T.Lambda(lambda x: torch.clamp(
-                    x + torch.randint_like(x, 0, 2) / 255, min=0, max=1
-                )),
+                T.Lambda(lambda x: (x + 1) / 2),
+                T.ToPILImage(),
                 T.RandomHorizontalFlip(),
                 T.RandomAffine(0, translate=(0.2, 0.2)),
+                T.ToTensor(),
+                T.Normalize(0.5, 0.5),
             ])
         self.transform = T.Compose([
             T.Resize((resolution, resolution)),
@@ -56,11 +56,11 @@ class Dataset(torch.utils.data.Dataset):
         # decode class
         cls = int(cls.decode())
 
-        if self.apply_cr is not None:
+        img = self.transform(img)
+        if self.apply_cr:
             img_aug = self.cr_transform(img)
         else:
-            img_aug = None
-        img = self.transform(img)
+            img_aug = -1
         return img, cls, img_aug
 
 
