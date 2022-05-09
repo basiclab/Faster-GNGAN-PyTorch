@@ -69,7 +69,10 @@ def train_D(
     z_dim: int,             # Dimension of latent space.
     cr_gamma: float,        # Consistency regularization gamma.
     gp_gamma: float,        # Gradient penalty gamma.
+    gp_center: float,       # Gradient norm target value.
     use_gn: bool,           # Whether to use gradient normalization.
+    use_fn: bool,           # Whether to use functional normalized GN.
+    use_gn_D: bool,         # Whether to use gradient normalization in D.
     **kwargs,
 ):
     images_real, classes_real, images_aug = next(loader)
@@ -80,8 +83,10 @@ def train_D(
         images_fake = G(z, classes_fake)
     x = torch.cat([images_real, images_fake], dim=0)
     y = torch.cat([classes_real, classes_fake], dim=0)
-    if use_gn:
-        scores = gn.normalize_D(D, x, loss_fn, y=y)
+    if gp_gamma > 0:
+        x.requires_grad_(True)
+    if use_gn or use_gn_D:
+        scores = gn.normalize_D(D, x, loss_fn, use_fn, y=y)
     else:
         scores = D(x, y=y)
     scores_real, scores_fake = torch.split(scores, bs_D)
@@ -94,13 +99,21 @@ def train_D(
     # Consistency Regularization.
     if cr_gamma > 0:
         images_aug = images_aug.to(device)
-        if use_gn:
-            scores_aug = gn.normalize_D(D, images_aug, loss_fn, y=classes_real)
+        if use_gn or use_gn_D:
+            scores_aug = gn.normalize_D(D, images_aug, loss_fn, use_fn, y=classes_real)
         else:
             scores_aug = D(images_aug, y=classes_real)
         loss_cr = (scores_aug - scores_real).square().mean()
         loss_D += loss_cr.mul(cr_gamma)
         loss_meter.append('loss/D/cr', loss_cr.detach().cpu())
+
+    if gp_gamma > 0:
+        grad = torch.autograd.grad(
+            outputs=scores.sum(), inputs=x, create_graph=True)[0]
+        loss_gp = torch.norm(torch.flatten(grad, start_dim=1), dim=1)
+        loss_gp = (loss_gp - gp_center).square()
+        loss_D += loss_gp.mul(gp_gamma).mean()
+        loss_meter.append('loss/D/gp', loss_gp.detach().mean().cpu())
 
     # Backward.
     loss_D.mul(gain).backward()
@@ -117,13 +130,15 @@ def train_G(
     n_classes: int,         # Number of classes in the dataset.
     z_dim: int,             # Dimension of latent space.
     use_gn: bool,           # Whether to use gradient normalization.
+    use_fn: bool,           # Whether to use functional normalized GN.
+    use_gn_G: bool,         # Whether to use gradient normalization in G.
     **kwargs,
 ):
     z = torch.randn(bs_G, z_dim, device=device)
     y = torch.randint(n_classes, (bs_G,), device=device)
     fake = G(z, y)
-    if use_gn:
-        scores = gn.normalize_G(D, fake, loss_fn, y=y)
+    if use_gn or use_gn_G:
+        scores = gn.normalize_G(D, fake, loss_fn, use_fn, y=y)
     else:
         scores = D(fake, y=y)
     loss_G = scores.mean()
@@ -157,7 +172,11 @@ def training_loop(
     beta1: float,           # Beta1 of the Adam optimizer.
     cr_gamma: float,        # Consistency regularization gamma.
     gp_gamma: float,        # Gradient penalty gamma.
+    gp_center: float,       # Gradient norm target value.
     use_gn: bool,           # Whether to use gradient normalization.
+    use_fn: bool,           # Whether to use functional normalized GN.
+    use_gn_D: bool,         # Whether to use gradient normalization in D.
+    use_gn_G: bool,         # Whether to use gradient normalization in G,
     rescale_alpha: float,   # Alpha parameter of the rescaling.
     ema_decay: float,       # Decay rate of the exponential moving average.
     ema_start: int,         # Start iteration of the exponential moving average.
