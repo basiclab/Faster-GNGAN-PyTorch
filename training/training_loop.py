@@ -139,9 +139,10 @@ def train_G(
     fake = G(z, y)
     if use_gn or use_gn_G:
         scores = gn.normalize_G(D, fake, loss_fn, use_fn, y=y)
+        loss_G = scores.mean()
     else:
         scores = D(fake, y=y)
-    loss_G = scores.mean()
+        loss_G = loss_fn(scores)
     loss_G.mul(gain).backward()
 
     loss_meter.append('loss/G', loss_G.detach().cpu())
