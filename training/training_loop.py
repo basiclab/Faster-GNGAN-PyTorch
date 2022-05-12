@@ -70,6 +70,7 @@ def train_D(
     cr_gamma: float,        # Consistency regularization gamma.
     gp0_gamma: float,       # 0 Gradient penalty gamma.
     gp1_gamma: float,       # 1 Gradient penalty gamma.
+    gps_gamma: float,       # sign Gradient penalty gamma.
     use_gn: bool,           # Whether to use gradient normalization.
     use_fn: bool,           # Whether to use functional normalized GN.
     use_gn_D: bool,         # Whether to use gradient normalization in D.
@@ -83,7 +84,7 @@ def train_D(
         images_fake = G(z, classes_fake)
     x = torch.cat([images_real, images_fake], dim=0)
     y = torch.cat([classes_real, classes_fake], dim=0)
-    if gp0_gamma > 0 or gp1_gamma > 0:
+    if gp0_gamma > 0 or gp1_gamma > 0 or gps_gamma > 0:
         x.requires_grad_(True)
     if use_gn or use_gn_D:
         scores = gn.normalize_D(D, x, loss_fn, use_fn, y=y)
@@ -108,7 +109,7 @@ def train_D(
         loss_meter.append('loss/D/cr', loss_cr.detach().cpu())
 
     # Gradient Penalty.
-    if gp0_gamma > 0 or gp1_gamma > 0:
+    if gp0_gamma > 0 or gp1_gamma > 0 or gps_gamma > 0:
         grad = torch.autograd.grad(
             outputs=scores.sum(), inputs=x, create_graph=True)[0]
         grad_norm = torch.norm(torch.flatten(grad, start_dim=1), dim=1)
@@ -120,6 +121,12 @@ def train_D(
             loss_gp = (grad_norm - 1).square()
             loss_D += loss_gp.mul(gp1_gamma).mean()
             loss_meter.append('loss/D/gp1', loss_gp.detach().mean().cpu())
+        if gps_gamma > 0:
+            f_sign = torch.cat([torch.ones(bs_D, 1), -torch.ones(bs_D, 1)]).to(device)
+            g_sign = scores.detach().sign()
+            loss_gp = grad_norm
+            loss_D += loss_gp.mul(f_sign).mul(g_sign).mul(gps_gamma).mean()
+            loss_meter.append('loss/D/gps', loss_gp.detach().mean().cpu())
 
     # Backward.
     loss_D.mul(gain).backward()
@@ -178,8 +185,9 @@ def training_loop(
     beta0: float,           # Beta0 of the Adam optimizer.
     beta1: float,           # Beta1 of the Adam optimizer.
     cr_gamma: float,        # Consistency regularization gamma.
-    gp0_gamma: float,        # Gradient penalty gamma.
-    gp1_gamma: float,        # Gradient penalty gamma.
+    gp0_gamma: float,       # 0 Gradient penalty gamma.
+    gp1_gamma: float,       # 1 Gradient penalty gamma.
+    gps_gamma: float,       # sign Gradient penalty gamma.
     use_gn: bool,           # Whether to use gradient normalization.
     use_fn: bool,           # Whether to use functional normalized GN.
     use_gn_D: bool,         # Whether to use gradient normalization in D.
