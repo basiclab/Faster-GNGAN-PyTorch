@@ -173,7 +173,8 @@ def training_loop(
     z_dim: int,             # Dimension of latent space.
     architecture_D: str,    # Discriminator class path.
     architecture_G: str,    # Generator class path.
-    loss: str,              # loss function class path.
+    loss_D: str,            # loss function class path for D.
+    loss_G: str,            # loss function class path for G.
     steps: int,             # Total iteration of the training.
     step_D: int,            # The number of iteration of the D per iteration of the G.
     bs_D: int,              # Total batch size for one training iteration of D.
@@ -251,7 +252,8 @@ def training_loop(
     G_lrsched = torch.optim.lr_scheduler.LinearLR(G_opt, 1.0, end_factor, total_iters=steps)
 
     # Loss function for real and fake images.
-    loss_fn = misc.construct_class(loss)
+    loss_fn_D = misc.construct_class(loss_D)
+    loss_fn_G = misc.construct_class(loss_G)
 
     # tf board writer.
     if rank == 0:
@@ -322,7 +324,7 @@ def training_loop(
                     D.rescale(alpha=rescale_alpha)
             for i in range(accumulation):
                 with misc.ddp_sync(D, sync=(i == accumulation - 1)):
-                    train_D(device, loader, meter, D, G, loss_fn,
+                    train_D(device, loader, meter, D, G, loss_fn_D,
                             gain=1 / accumulation, **kwargs)
             D_opt.step()
             D_opt.zero_grad(set_to_none=True)
@@ -338,7 +340,7 @@ def training_loop(
         G.requires_grad_(True)
         for i in range(accumulation):
             with misc.ddp_sync(G, sync=(i == accumulation - 1)):
-                train_G(device, meter, D, G, loss_fn,
+                train_G(device, meter, D, G, loss_fn_G,
                         gain=1 / accumulation, **kwargs)
         G_opt.step()
         G_opt.zero_grad(set_to_none=True)
