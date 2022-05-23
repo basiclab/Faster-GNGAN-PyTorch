@@ -22,12 +22,10 @@ class Dataset(torch.utils.data.Dataset):
         self.apply_cr = apply_cr
         if self.apply_cr:
             self.cr_transform = T.Compose([
-                T.Lambda(lambda x: (x + 1) / 2),
-                T.ToPILImage(),
-                T.RandomHorizontalFlip(),
+                T.Resize((resolution, resolution)),
+                T.RandomHorizontalFlip(p=0.5),
                 T.RandomAffine(0, translate=(0.2, 0.2)),
                 T.ToTensor(),
-                T.Normalize(0.5, 0.5),
             ])
         self.transform = T.Compose([
             T.Resize((resolution, resolution)),
@@ -56,12 +54,12 @@ class Dataset(torch.utils.data.Dataset):
         # decode class
         cls = int(cls.decode())
 
-        img = self.transform(img)
+        img_ori = self.transform(img)
         if self.apply_cr:
             img_aug = self.cr_transform(img)
         else:
             img_aug = -1
-        return img, cls, img_aug
+        return img_ori, cls, img_aug
 
 
 class InfiniteSampler(torch.utils.data.Sampler):

@@ -18,8 +18,8 @@ class Rescalable(nn.Module):
 
 
 class RescalableSequentialModel(Rescalable):
-    """Sequentially expand chidren modules."""
     def expand(self, p, base_scale, alpha):
+        """Sequentially expand chidren modules."""
         for m in p.children():
             if isinstance(m, Rescalable):
                 base_scale = m.rescale(base_scale, alpha)
@@ -33,6 +33,7 @@ class RescalableSequentialModel(Rescalable):
 
 
 class RescalableResBlock(Rescalable):
+
     def __init__(self):
         super().__init__()
         self.shortcut_scale = 1
