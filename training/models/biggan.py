@@ -95,7 +95,7 @@ class Generator(nn.Module):
         super().__init__()
         config = {
             # channels, attn_indices, use_shared_embedding
-            32: ([256, 256, 256, 256], [], False,),
+            32: ([256, 256, 256, 256], [], False),
             128: ([1536, 1536, 768, 384, 192, 96], [4], True),
         }
         assert resolution in config, "The resolution %d is not supported in Generator." % resolution
@@ -107,14 +107,12 @@ class Generator(nn.Module):
             self.z_chunk_size = z_dim // self.z_chunk_num
             self.cbn_in_dim = self.z_chunk_size + shared_dim
             self.use_shared_embedding = nn.Embedding(n_classes, shared_dim)
-            blocks = [
-                sn(nn.Linear(self.z_chunk_size, channels[0] * 4 * 4))]
+            blocks = [sn(nn.Linear(self.z_chunk_size, channels[0] * 4 * 4))]
         else:
             # CIFAR10
             self.z_chunk_num = len(channels)    # for code simplicity
             self.cbn_in_dim = n_classes
-            blocks = [
-                sn(nn.Linear(z_dim, channels[0] * 4 * 4))]
+            blocks = [sn(nn.Linear(z_dim, channels[0] * 4 * 4))]
         blocks.append(Reshape(-1, channels[0], 4, 4))
 
         for i in range(1, len(channels)):
@@ -124,8 +122,7 @@ class Generator(nn.Module):
                 self.cbn_in_dim,
                 cbn_linear=use_shared_embedding))
             if i in attn_indices:
-                blocks.append(
-                    Attention(channels[i], use_spectral_norm=True))
+                blocks.append(Attention(channels[i], use_spectral_norm=True))
         blocks.extend([
             nn.BatchNorm2d(channels[-1]),
             nn.ReLU(inplace=True),
@@ -232,14 +229,14 @@ class Discriminator(RescalableDiscriminator):
         assert resolution in config, "The resolution %d is not supported in Discriminator." % resolution
         channels, attn_indices, down_layers = config[resolution]
 
-        blocks = [OptimizedDisBlock(3, channels[0])]
-        if 0 in attn_indices:
-            blocks.append(Attention(channels[0], use_spectral_norm=False))
-        for i in range(1, len(channels)):
-            blocks.append(
-                DisBlock(channels[i - 1], channels[i], down=i < down_layers))
+        for i in range(len(channels)):
+            if i == 0:
+                blocks = [OptimizedDisBlock(3, channels[i])]
+            else:
+                blocks.append(
+                    DisBlock(channels[i - 1], channels[i], down=i < down_layers))
             if i in attn_indices:
-                blocks.append(Attention(channels[0], use_spectral_norm=False))
+                blocks.append(Attention(channels[i], use_spectral_norm=False))
         blocks.append(nn.ReLU(inplace=True)),
 
         self.main = nn.Sequential(*blocks)
