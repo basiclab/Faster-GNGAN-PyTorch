@@ -27,7 +27,7 @@ class HingeLoss(nn.Module):
 class WGANLoss(nn.Module):
     def forward(self, scores_fake, scores_real=None):
         if scores_real is not None:
-            loss_real = scores_real.mean()
+            loss_real = -scores_real.mean()
             loss_fake = scores_fake.mean()
             return loss_fake, loss_real
         else:
