@@ -1,5 +1,8 @@
+import math
+
 import torch
 import torch.nn as nn
+from torch.nn.init import _calculate_fan_in_and_fan_out, calculate_gain
 
 
 class Reshape(nn.Module):
@@ -83,11 +86,18 @@ class RescalableWrapper(Rescalable):
     @torch.no_grad()
     def rescale(self, base_scale=1., alpha=1.):
         if 'weight_raw' in self.module._parameters:
-            self.module.weight_scale = alpha * self.module.weight_norm / (
-                self.module.weight_raw.norm(p=2) + 1e-12)
+            if alpha > 0:
+                self.module.weight_scale = alpha * self.module.weight_norm / (
+                    self.module.weight_raw.norm(p=2) + 1e-12)
+            else:
+                fan_in, fan_out = _calculate_fan_in_and_fan_out(self.module.weight_raw)
+                gain = calculate_gain('relu')
+                # std = gain * math.sqrt(2.0 / (fan_in + fan_out))    # xavier
+                std = gain / math.sqrt(fan_in)                      # kaiming
+                self.module.weight_scale = std / (self.module.weight_raw.std() + 1e-12)
             base_scale = base_scale * self.module.weight_scale
-        if 'bias_raw' in self.module._parameters:
-            self.module.bias_scale = base_scale
+            if 'bias_raw' in self.module._parameters:
+                self.module.bias_scale = base_scale
         return base_scale
 
     @staticmethod
