@@ -29,7 +29,7 @@ class Hook(object):
     @torch.no_grad()
     def __call__(self, grad):
         """
-        dL     dL                1                df
+        dL     dL           || df/dx ||           df
         -- = ------ x ----------------------- x ------
         dx   df_hat   (|| df/dx || + | f |)^2     dx
              ~~~~~~   ~~~~~~~~~~~~~~~~~~~~~~~   ~~~~~~
