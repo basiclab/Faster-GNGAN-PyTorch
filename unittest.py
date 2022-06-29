@@ -111,26 +111,28 @@ def test_loss():
             print("Test", loss_fn.__class__.__name__)
 
             for _ in range(10):
-                x = torch.randn(2, 3, res, res, requires_grad=True, device=device)
-                y = torch.randint(n_classes, (1,), device=device)
+                x = torch.randn(3, 3, res, res, requires_grad=True, device=device)
+                y = torch.randint(n_classes, (3,), device=device)
                 x.retain_grad()
 
                 D1.zero_grad()
-                y1 = gn.normalize_D(D1, x, y=y)
+                y1 = gn.normalize_D(D1, x, loss_fn, use_fn=True, y=y)
                 loss = loss_fn(y1)
                 loss.backward()
                 grad1 = x.grad.detach().clone()
                 x.grad.zero_()
 
                 D2.zero_grad()
-                y2 = gn.normalize_G(D2, loss_fn, x, y=y)
+                y2 = gn.normalize_G(D2, x, loss_fn, use_fn=True, y=y)
                 loss = y2.mean()
                 loss.backward()
                 grad2 = x.grad.detach().clone()
                 x.grad.zero_()
 
-                if not torch.allclose(grad1, grad2, rtol=1e-3):
-                    print("[Warning] Relative Err%.7f" % (grad1 - grad2).abs().div(grad2.abs()).mean())
+                if not torch.allclose(grad1, grad2, atol=1e-7, rtol=1e-5):
+                    print("[Warning] Rel. Err: %.7f, Abs. Err: %.15f" % (
+                        (grad1 - grad2).abs().div(grad2.abs()).max(),
+                        (grad1 - grad2).abs().max()))
             print("Finish")
 
 
