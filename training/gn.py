@@ -2,17 +2,18 @@ import torch
 
 
 class Hook(object):
-    def __init__(self, f, loss_fn, use_fn):
+    def __init__(self, f, loss_fn, use_fn, c):
         self.f = f[:, 0]        # [B, 1] -> [B]
         self.loss_fn = loss_fn
         self.use_fn = use_fn
+        self.c = c
         self.handle = None
 
     def set_handle(self, handle):
         self.handle = handle
 
     def loss_scale(self, grad_norm):
-        f_hat = self.f / (grad_norm + torch.abs(self.f))
+        f_hat = self.f / (self.c * grad_norm + torch.abs(self.f))
         with torch.enable_grad():
             f_hat.requires_grad_(True)
             loss = self.loss_fn(f_hat)
@@ -21,9 +22,9 @@ class Hook(object):
 
     def grad_scale(self, grad_norm):
         if self.use_fn:
-            scale = grad_norm / ((grad_norm + torch.abs(self.f)) ** 2)
+            scale = self.c * grad_norm / ((self.c * grad_norm + torch.abs(self.f)) ** 2)
         else:
-            scale = 1 / grad_norm
+            scale = 1 / (self.c * grad_norm)
         return scale.view(-1, 1, 1, 1)
 
     @torch.no_grad()
@@ -44,15 +45,15 @@ class Hook(object):
         return grad
 
 
-def normalize_G(net_D, x, loss_fn, use_fn, **kwargs):
+def normalize_G(net_D, x, loss_fn, use_fn, c, **kwargs):
     f = net_D(x, **kwargs)
-    hook = Hook(f, loss_fn, use_fn)
+    hook = Hook(f, loss_fn, use_fn, c)
     handle = x.register_hook(hook)
     hook.set_handle(handle)
     return f
 
 
-def normalize_D(net_D, x, loss_fn, use_fn, **kwargs):
+def normalize_D(net_D, x, loss_fn, use_fn, c, **kwargs):
     """
                      f
     f_hat = -------------------
@@ -63,7 +64,7 @@ def normalize_D(net_D, x, loss_fn, use_fn, **kwargs):
     grad = torch.autograd.grad(f, x, torch.ones_like(f), create_graph=True)[0]
     grad_norm = grad.flatten(start_dim=1).norm(dim=1).view(-1, 1)
     if use_fn:
-        f_hat = f / (grad_norm + torch.abs(f))
+        f_hat = f / (c * grad_norm + torch.abs(f))
     else:
-        f_hat = f / grad_norm
+        f_hat = f / (c * grad_norm)
     return f_hat
