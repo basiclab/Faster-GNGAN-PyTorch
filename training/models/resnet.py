@@ -64,7 +64,7 @@ class Generator(nn.Module):
 
     def forward(self, z, *args, **kwargs):
         x = self.main(z)
-        return (x + 1) / 2
+        return x
 
 
 class FirstDisBlock(RescalableResBlock):
@@ -139,6 +139,5 @@ class Discriminator(RescalableSequentialModel):
                 m.init_module()
 
     def forward(self, x, *args, **kwargs):
-        x = x * 2 - 1
         y = self.main(x)
         return y

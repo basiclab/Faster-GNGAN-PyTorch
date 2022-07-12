@@ -1,16 +1,26 @@
 import copy
 import json
 import os
+from random import sample, shuffle
 
 import torch
 import torchvision
 from pytorch_gan_metrics import get_fid
 from tensorboardX import SummaryWriter
+from torch.utils.data.distributed import DistributedSampler
 from tqdm import trange, tqdm
 
 from training import datasets
 from training import misc
 from training import gn
+
+
+def infiniteloop(dataloader, sampler):
+    epoch = 0
+    while True:
+        sampler.set_epoch(epoch)
+        for x in dataloader:
+            yield x
 
 
 def fid(
@@ -36,7 +46,7 @@ def fid(
         z = torch.randn(bs_G, z_dim, device=device)
         y = torch.randint(n_classes, (bs_G,), device=device)
         with torch.no_grad():
-            batch_imgs = G(z, y)
+            batch_imgs = (G(z, y) + 1) / 2
         if num_gpus > 1:
             buf = [torch.empty_like(batch_imgs) for _ in range(num_gpus)]
             torch.distributed.all_gather(buf, batch_imgs)
@@ -74,6 +84,7 @@ def train_D(
     use_gn: bool,           # Whether to use gradient normalization.
     use_fn: bool,           # Whether to use functional normalized GN.
     use_gn_D: bool,         # Whether to use gradient normalization in D.
+    c: float,               #
     **kwargs,
 ):
     images_real, classes_real, images_aug = next(loader)
@@ -87,7 +98,7 @@ def train_D(
     if gp0_gamma > 0 or gp1_gamma > 0 or gps_gamma > 0:
         x.requires_grad_(True)
     if use_gn or use_gn_D:
-        scores = gn.normalize_D(D, x, loss_fn, use_fn, y=y)
+        scores = gn.normalize_D(D, x, loss_fn, use_fn, c, y=y)
     else:
         scores = D(x, y=y)
     scores_real, scores_fake = torch.split(scores, bs_D)
@@ -101,7 +112,7 @@ def train_D(
     if cr_gamma > 0:
         images_aug = images_aug.to(device)
         if use_gn or use_gn_D:
-            scores_aug = gn.normalize_D(D, images_aug, loss_fn, use_fn, y=classes_real)
+            scores_aug = gn.normalize_D(D, images_aug, loss_fn, use_fn, c, y=classes_real)
         else:
             scores_aug = D(images_aug, y=classes_real)
         loss_cr = (scores_aug - scores_real).square().mean()
@@ -128,8 +139,17 @@ def train_D(
             loss_D += loss_gp.mul(f_sign).mul(g_sign).mul(gps_gamma).mean()
             loss_meter.append('loss/D/gps', loss_gp.detach().mean().cpu())
 
+    x.retain_grad()
     # Backward.
     loss_D.mul(gain).backward()
+
+    with torch.no_grad():
+        grad_norm_lower_bound = (1 + x.flatten(start_dim=1).norm(dim=1)).square().reciprocal().mean()
+        grad_norm = (x.grad.flatten(start_dim=1).norm(dim=1) * x.shape[0] / 2).mean()
+        margin = grad_norm - grad_norm_lower_bound
+        loss_meter.append('misc/grad_norm_lower_bound', grad_norm_lower_bound.cpu())
+        loss_meter.append('misc/grad_norm', grad_norm.cpu())
+        loss_meter.append('misc/margin', margin.cpu())
 
 
 def train_G(
@@ -145,13 +165,14 @@ def train_G(
     use_gn: bool,           # Whether to use gradient normalization.
     use_fn: bool,           # Whether to use functional normalized GN.
     use_gn_G: bool,         # Whether to use gradient normalization in G.
+    c: float,               #
     **kwargs,
 ):
     z = torch.randn(bs_G, z_dim, device=device)
     y = torch.randint(n_classes, (bs_G,), device=device)
     fake = G(z, y)
     if use_gn or use_gn_G:
-        scores = gn.normalize_G(D, fake, loss_fn, use_fn, y=y)
+        scores = gn.normalize_G(D, fake, loss_fn, use_fn, c, y=y)
         loss_G = scores.mean()
     else:
         scores = D(fake, y=y)
@@ -194,6 +215,7 @@ def training_loop(
     use_gn_D: bool,         # Whether to use gradient normalization in D.
     use_gn_G: bool,         # Whether to use gradient normalization in G,
     rescale_alpha: float,   # Alpha parameter of the rescaling.
+    c,
     ema_decay: float,       # Decay rate of the exponential moving average.
     ema_start: int,         # Start iteration of the exponential moving average.
     sample_step: int,       # Sample from fixed z every sample_step iterations.
@@ -214,12 +236,14 @@ def training_loop(
 
     device = torch.device('cuda:%d' % rank)
     dataset = datasets.Dataset(data_path, hflip, resolution, cr_gamma > 0)
-    sampler = datasets.InfiniteSampler(dataset, rank, num_gpus, seed=seed)
-    loader = iter(torch.utils.data.DataLoader(
+    sampler = DistributedSampler(dataset, num_gpus, rank, seed=seed, drop_last=True)
+    loader = torch.utils.data.DataLoader(
         dataset=dataset,
         batch_size=bs_D,
         sampler=sampler,
-        num_workers=min(torch.get_num_threads(), 16)))
+        num_workers=min(torch.get_num_threads(), 16),
+        drop_last=True)
+    loader = infiniteloop(loader, sampler)
 
     # Construct Models.
     D = misc.construct_class(architecture_D, resolution, n_classes).to(device)
@@ -243,13 +267,13 @@ def training_loop(
     G_opt = torch.optim.Adam(G.parameters(), lr=lr_G, betas=[beta0, beta1])
 
     # Setup learning rate linearly decay scheduler.
-    if lr_decay:
-        end_factor = 0.0
-    else:
-        end_factor = 1.0
-    # pytorch version >= 1.10.0
-    D_lrsched = torch.optim.lr_scheduler.LinearLR(D_opt, 1.0, end_factor, total_iters=steps)
-    G_lrsched = torch.optim.lr_scheduler.LinearLR(G_opt, 1.0, end_factor, total_iters=steps)
+    def decay_rate(step):
+        if lr_decay:
+            return 1 - step / steps
+        else:
+            return 1.0
+    D_lrsched = torch.optim.lr_scheduler.LambdaLR(D_opt, lr_lambda=decay_rate)
+    G_lrsched = torch.optim.lr_scheduler.LambdaLR(G_opt, lr_lambda=decay_rate)
 
     # Loss function for real and fake images.
     loss_fn_D = misc.construct_class(loss_D)
@@ -371,8 +395,8 @@ def training_loop(
         # Generate images from fixed z every sample_step steps.
         if step == 1 or step % sample_step == 0:
             with torch.no_grad():
-                imgs = G(fixed_z[rank], fixed_y[rank])
-                imgs_ema = G_ema(fixed_z[rank], fixed_y[rank])
+                imgs = (G(fixed_z[rank], fixed_y[rank]) + 1) / 2
+                imgs_ema = (G_ema(fixed_z[rank], fixed_y[rank]) + 1) / 2
             if is_ddp:
                 buf = [torch.empty_like(imgs) for _ in range(num_gpus)]
                 buf_ema = [torch.empty_like(imgs_ema) for _ in range(num_gpus)]

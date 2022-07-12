@@ -156,7 +156,7 @@ class Generator(nn.Module):
             else:
                 x = m(x)
 
-        return (x + 1) / 2
+        return x
 
 
 class OptimizedDisBlock(RescalableResBlock):
@@ -210,7 +210,6 @@ class RescalableDiscriminator(RescalableSequentialModel):
         return lin_scale
 
     def forward(self, x, y):
-        x = x * 2 - 1
         e = self.embedding(y)
         h = self.main(x).sum(dim=[2, 3])
         y_lin = self.linear(h)

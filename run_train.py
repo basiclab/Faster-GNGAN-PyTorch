@@ -40,6 +40,7 @@ from training import misc
 @click.option('--use_gn_D/--no-use_gn_D', 'use_gn_D', default=False)
 @click.option('--use_gn_G/--no-use_gn_G', 'use_gn_G', default=False)
 @click.option('--rescale_alpha', default=None, type=float)
+@click.option('--c', default=1.0, type=float)
 @click.option('--ema_decay', default=0.9999)
 @click.option('--ema_start', default=0)
 @click.option('--sample_step', default=500)

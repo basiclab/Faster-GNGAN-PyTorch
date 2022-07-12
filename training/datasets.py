@@ -26,11 +26,13 @@ class Dataset(torch.utils.data.Dataset):
                 T.RandomHorizontalFlip(p=0.5),
                 T.RandomAffine(0, translate=(0.2, 0.2)),
                 T.ToTensor(),
+                T.Normalize(0.5, 0.5),
             ])
         self.transform = T.Compose([
             T.Resize((resolution, resolution)),
             T.RandomHorizontalFlip(p=0.5) if hflip else T.Compose([]),
             T.ToTensor(),
+            T.Normalize(0.5, 0.5),
         ])
 
         self.env = lmdb.open(
@@ -46,6 +48,8 @@ class Dataset(torch.utils.data.Dataset):
         with self.env.begin(write=False) as txn:
             img = txn.get(f'd{index}'.encode())
             cls = txn.get(f'l{index}'.encode())
+            assert img is not None, f"index={index}"
+            assert cls is not None, f"index={index}"
         # decode image
         buf = io.BytesIO()
         buf.write(img)
@@ -60,40 +64,6 @@ class Dataset(torch.utils.data.Dataset):
         else:
             img_aug = -1
         return img_ori, cls, img_aug
-
-
-class InfiniteSampler(torch.utils.data.Sampler):
-    def __init__(self, dataset, rank=0, num_replicas=1, shuffle=True, seed=0, window_size=0.5):
-        assert len(dataset) > 0
-        assert num_replicas > 0
-        assert 0 <= rank < num_replicas
-        assert 0 <= window_size <= 1
-        super().__init__(dataset)
-        self.dataset = dataset
-        self.rank = rank
-        self.num_replicas = num_replicas
-        self.shuffle = shuffle
-        self.seed = seed
-        self.window_size = window_size
-
-    def __iter__(self):
-        if self.shuffle:
-            g = torch.Generator().manual_seed(self.seed)
-            order = torch.randperm(len(self.dataset), generator=g).tolist()
-            window = int(len(order) * self.window_size)
-        else:
-            order = torch.arange(len(self.dataset)).tolist()
-            window = 0
-
-        idx = 0
-        while True:
-            i = idx % len(order)
-            if idx % self.num_replicas == self.rank:
-                yield order[i]
-            if window >= 2:
-                j = (i - torch.randint(window, [], generator=g)) % len(order)
-                order[i], order[j] = order[j], order[i]
-            idx += 1
 
 
 @click.command()
