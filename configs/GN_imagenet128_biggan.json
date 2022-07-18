@@ -19,6 +19,7 @@
     "use_gn": true,
     "ema_decay": 0.9999,
     "ema_start": 0,
+    "eval_step": 1000,
     "beta0": 0.0,
     "beta1": 0.999,
     "fid_stats": "./stats/imagenet.train.128.npz"

@@ -162,6 +162,7 @@ def train_G(
     bs_G: int,              # Batch size for G.
     n_classes: int,         # Number of classes in the dataset.
     z_dim: int,             # Dimension of latent space.
+    gn_impl: str,           # The implementation name of gradient normalization
     use_gn: bool,           # Whether to use gradient normalization.
     use_fn: bool,           # Whether to use functional normalized GN.
     use_gn_G: bool,         # Whether to use gradient normalization in G.
@@ -172,8 +173,12 @@ def train_G(
     y = torch.randint(n_classes, (bs_G,), device=device)
     fake = G(z, y)
     if use_gn or use_gn_G:
-        scores = gn.normalize_G(D, fake, loss_fn, use_fn, c, y=y)
-        loss_G = scores.mean()
+        if gn_impl == 'norm_G':
+            scores = gn.normalize_G(D, fake, loss_fn, use_fn, c, y=y)
+            loss_G = scores.mean()
+        else:
+            scores = gn.normalize_D(D, fake, loss_fn, use_fn, c, y=y)
+            loss_G = loss_fn(scores)
     else:
         scores = D(fake, y=y)
         loss_G = loss_fn(scores)
@@ -210,6 +215,7 @@ def training_loop(
     gp0_gamma: float,       # 0 Gradient penalty gamma.
     gp1_gamma: float,       # 1 Gradient penalty gamma.
     gps_gamma: float,       # sign Gradient penalty gamma.
+    gn_impl: str,           # The implementation name of gradient normalization
     use_gn: bool,           # Whether to use gradient normalization.
     use_fn: bool,           # Whether to use functional normalized GN.
     use_gn_D: bool,         # Whether to use gradient normalization in D.
@@ -249,6 +255,7 @@ def training_loop(
     D = misc.construct_class(architecture_D, resolution, n_classes).to(device)
     G = misc.construct_class(architecture_G, resolution, n_classes, z_dim).to(device)
     G_ema = copy.deepcopy(G)
+    G_ema.requires_grad_(False)
 
     # Initialize models for multi-gpu training.
     is_ddp = num_gpus > 1
@@ -355,8 +362,8 @@ def training_loop(
         D_lrsched.step()
         D.requires_grad_(False)
 
+        # Record the last forward and backward pass of D.
         if rank == 0:
-            # Record the last forward and backward pass of D.
             for tag, value in collector.norms():
                 writer.add_scalar(tag, value, step)
 
@@ -379,13 +386,12 @@ def training_loop(
             G_ema_dict[name].data.copy_(
                 G_ema_dict[name].data * ema_beta + G_dict[name].data * (1 - ema_beta))
 
+        # Update tf board and progress bar
         if rank == 0:
-            # Update tf board
             losses = meter.todict()
             for tag, value in losses.items():
                 writer.add_scalar(tag, value, step)
 
-            # Update progress bar
             progress.set_postfix_str(", ".join([
                 f"D_fake: {losses['loss/D/fake']:.3f}",
                 f"D_real: {losses['loss/D/real']:.3f}",

@@ -15,9 +15,10 @@
     "bs_G": 128,
     "lr_D": 0.0002,
     "lr_G": 0.0002,
-    "lr_decay": true,
+    "lr_decay": false,
     "use_gn": true,
     "ema_decay": 0.9999,
-    "ema_start": 20000,
+    "ema_start": 10000,
+    "eval_step": 1000,
     "fid_stats": "./stats/celebahq.all.256.npz"
 }

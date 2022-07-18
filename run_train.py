@@ -35,6 +35,7 @@ from training import misc
 @click.option('--gp0_gamma', default=0.0)
 @click.option('--gp1_gamma', default=0.0)
 @click.option('--gps_gamma', default=0.0)
+@click.option('--gn_impl', type=click.Choice(['norm_G', 'norm_D']), default='norm_G')
 @click.option('--use_gn/--no-use_gn', default=True)
 @click.option('--use_fn/--no-use_fn', default=True)
 @click.option('--use_gn_D/--no-use_gn_D', 'use_gn_D', default=False)

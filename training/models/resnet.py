@@ -59,7 +59,7 @@ class Generator(nn.Module):
         # initialize weight
         for m in self.modules():
             if isinstance(m, (nn.Conv2d, nn.Linear)):
-                torch.nn.init.kaiming_normal_(m.weight)
+                torch.nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
                 torch.nn.init.zeros_(m.bias)
 
     def forward(self, z, *args, **kwargs):
@@ -134,7 +134,7 @@ class Discriminator(RescalableSequentialModel):
         # initialize weight
         for m in self.modules():
             if isinstance(m, RescalableWrapper):
-                init.kaiming_normal_(m.module.weight)
+                init.kaiming_normal_(m.module.weight, nonlinearity='relu')
                 init.zeros_(m.module.bias)
                 m.init_module()
 
