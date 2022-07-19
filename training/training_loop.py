@@ -21,6 +21,7 @@ def infiniteloop(dataloader, sampler):
         sampler.set_epoch(epoch)
         for x in dataloader:
             yield x
+        epoch += 1
 
 
 def fid(
