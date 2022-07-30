@@ -235,8 +235,8 @@ def training_loop(
     kwargs: dict,           # All arguments for dumping to the config file.
     **dummy,
 ):
-    assert bs_D % (accumulation * num_gpus) == 0, "bs_D is not divisible by accumulation and num_gpus"
-    assert bs_G % (accumulation * num_gpus) == 0, "bs_G is not divisible by accumulation and num_gpus"
+    assert bs_D % (accumulation * num_gpus) == 0, "bs_D is not divisible by (accumulation * num_gpus)"
+    assert bs_G % (accumulation * num_gpus) == 0, "bs_G is not divisible by (accumulation * num_gpus)"
     bs_D = bs_D // (accumulation * num_gpus)
     bs_G = bs_G // (accumulation * num_gpus)
     misc.set_seed(rank + seed)
@@ -256,7 +256,6 @@ def training_loop(
     D = misc.construct_class(architecture_D, resolution, n_classes).to(device)
     G = misc.construct_class(architecture_G, resolution, n_classes, z_dim).to(device)
     G_ema = copy.deepcopy(G)
-    G_ema.requires_grad_(False)
 
     # Initialize models for multi-gpu training.
     is_ddp = num_gpus > 1
@@ -269,6 +268,8 @@ def training_loop(
         G_ema = torch.nn.SyncBatchNorm.convert_sync_batchnorm(G_ema)
         G_ema = torch.nn.parallel.DistributedDataParallel(
             G_ema, device_ids=[rank], output_device=rank)
+    # This must be done after the initialization of DistributedDataParallel
+    G_ema.requires_grad_(False)
 
     # Initialize Optimizer.
     D_opt = torch.optim.Adam(D.parameters(), lr=lr_D, betas=[beta0, beta1])
