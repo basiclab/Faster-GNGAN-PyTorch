@@ -1,19 +1,14 @@
 import torch
 
 
-class Hook(object):
-    def __init__(self, f, loss_fn, use_fn, c):
+class GradUpdateHook(object):
+    def __init__(self, f, x, loss_fn):
         self.f = f[:, 0]        # [B, 1] -> [B]
         self.loss_fn = loss_fn
-        self.use_fn = use_fn
-        self.c = c
-        self.handle = None
-
-    def set_handle(self, handle):
-        self.handle = handle
+        self.handle = x.register_hook(self)
 
     def loss_scale(self, grad_norm):
-        f_hat = self.f / (self.c * grad_norm + torch.abs(self.f))
+        f_hat = self.f / (grad_norm + torch.abs(self.f))
         with torch.enable_grad():
             f_hat.requires_grad_(True)
             loss = self.loss_fn(f_hat)
@@ -21,10 +16,7 @@ class Hook(object):
         return scale.view(-1, 1, 1, 1)
 
     def grad_scale(self, grad_norm):
-        if self.use_fn:
-            scale = self.c * grad_norm / ((self.c * grad_norm + torch.abs(self.f)) ** 2)
-        else:
-            scale = 1 / (self.c * grad_norm)
+        scale = grad_norm / ((grad_norm + torch.abs(self.f)) ** 2)
         return scale.view(-1, 1, 1, 1)
 
     @torch.no_grad()
@@ -41,30 +33,26 @@ class Hook(object):
         grad_norm = torch.norm(
             torch.flatten(grad, start_dim=1), p=2, dim=1) * grad.shape[0]
         grad = self.loss_scale(grad_norm) * self.grad_scale(grad_norm) * grad
+        # this is required to avoid memory leak
         self.handle.remove()
         return grad
 
 
-def normalize_G(net_D, x, loss_fn, use_fn, c, **kwargs):
-    f = net_D(x, **kwargs)
-    hook = Hook(f, loss_fn, use_fn, c)
-    handle = x.register_hook(hook)
-    hook.set_handle(handle)
-    return f
+def normalize_G(D, x, loss_fn, **kwargs):
+    f = D(x, **kwargs)
+    GradUpdateHook(f, x, loss_fn)
+    return f, None
 
 
-def normalize_D(net_D, x, loss_fn, use_fn, c, **kwargs):
+def normalize_D(D, x, loss_fn, **kwargs):
     """
                      f
     f_hat = -------------------
             || df/dx || + | f |
     """
     x.requires_grad_(True)
-    f = net_D(x, **kwargs)
+    f = D(x, **kwargs)
     grad = torch.autograd.grad(f, x, torch.ones_like(f), create_graph=True)[0]
     grad_norm = grad.flatten(start_dim=1).norm(dim=1).view(-1, 1)
-    if use_fn:
-        f_hat = f / (c * grad_norm + torch.abs(f))
-    else:
-        f_hat = f / (c * grad_norm)
-    return f_hat
+    f_hat = f / (grad_norm + torch.abs(f))
+    return f_hat, grad_norm

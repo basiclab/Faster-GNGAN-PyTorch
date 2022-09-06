@@ -1,4 +1,5 @@
 import copy
+from gc import collect
 import json
 import os
 from random import sample, shuffle
@@ -70,7 +71,7 @@ def fid(
 def train_D(
     device,                 # torch device.
     loader,                 # Iterator of DataLoader.
-    loss_meter,             # Meter for recording loss value.
+    meter,                  # Meter for recording loss value.
     D,                      # Discriminator.
     G,                      # Generator.
     loss_fn,                # Loss function.
@@ -79,13 +80,6 @@ def train_D(
     n_classes: int,         # Number of classes in the dataset.
     z_dim: int,             # Dimension of latent space.
     cr_gamma: float,        # Consistency regularization gamma.
-    gp0_gamma: float,       # 0 Gradient penalty gamma.
-    gp1_gamma: float,       # 1 Gradient penalty gamma.
-    gps_gamma: float,       # sign Gradient penalty gamma.
-    use_gn: bool,           # Whether to use gradient normalization.
-    use_fn: bool,           # Whether to use functional normalized GN.
-    use_gn_D: bool,         # Whether to use gradient normalization in D.
-    c: float,               #
     **kwargs,
 ):
     images_real, classes_real, images_aug = next(loader)
@@ -96,66 +90,40 @@ def train_D(
         images_fake = G(z, classes_fake)
     x = torch.cat([images_real, images_fake], dim=0)
     y = torch.cat([classes_real, classes_fake], dim=0)
-    if gp0_gamma > 0 or gp1_gamma > 0 or gps_gamma > 0:
-        x.requires_grad_(True)
-    if use_gn or use_gn_D:
-        scores = gn.normalize_D(D, x, loss_fn, use_fn, c, y=y)
-    else:
-        scores = D(x, y=y)
+    scores, grad_norm = gn.normalize_D(D, x, loss_fn, y=y)
     scores_real, scores_fake = torch.split(scores, bs_D)
     loss_fake, loss_real = loss_fn(scores_fake, scores_real)
     loss_D = loss_fake + loss_real
-    loss_meter.append('loss/D', (loss_fake + loss_real).detach().cpu())
-    loss_meter.append('loss/D/real', loss_real.detach().cpu())
-    loss_meter.append('loss/D/fake', loss_fake.detach().cpu())
+
+    meter.append('loss/D', (loss_fake + loss_real).detach().cpu())
+    meter.append('loss/D/real', loss_real.detach().cpu())
+    meter.append('loss/D/fake', loss_fake.detach().cpu())
+    meter.append('norm/grad_fx_norm', grad_norm.detach().mean().cpu())
 
     # Consistency Regularization.
     if cr_gamma > 0:
         images_aug = images_aug.to(device)
-        if use_gn or use_gn_D:
-            scores_aug = gn.normalize_D(D, images_aug, loss_fn, use_fn, c, y=classes_real)
-        else:
-            scores_aug = D(images_aug, y=classes_real)
+        scores_aug, _ = gn.normalize_D(D, images_aug, loss_fn, y=classes_real)
         loss_cr = (scores_aug - scores_real).square().mean()
         loss_D += loss_cr.mul(cr_gamma)
-        loss_meter.append('loss/D/cr', loss_cr.detach().cpu())
+        meter.append('loss/D/cr', loss_cr.detach().cpu())
 
-    # Gradient Penalty.
-    if gp0_gamma > 0 or gp1_gamma > 0 or gps_gamma > 0:
-        grad = torch.autograd.grad(
-            outputs=scores.sum(), inputs=x, create_graph=True)[0]
-        grad_norm = torch.norm(torch.flatten(grad, start_dim=1), dim=1)
-        if gp0_gamma > 0:
-            loss_gp = grad_norm
-            loss_D += loss_gp.mul(gp0_gamma).mean()
-            loss_meter.append('loss/D/gp0', loss_gp.detach().mean().cpu())
-        if gp1_gamma > 0:
-            loss_gp = (grad_norm - 1).square()
-            loss_D += loss_gp.mul(gp1_gamma).mean()
-            loss_meter.append('loss/D/gp1', loss_gp.detach().mean().cpu())
-        if gps_gamma > 0:
-            f_sign = torch.cat([torch.ones(bs_D, 1), -torch.ones(bs_D, 1)]).to(device)
-            g_sign = scores.detach().sign()
-            loss_gp = grad_norm
-            loss_D += loss_gp.mul(f_sign).mul(g_sign).mul(gps_gamma).mean()
-            loss_meter.append('loss/D/gps', loss_gp.detach().mean().cpu())
-
-    x.retain_grad()
+    collector = misc.GradFxCollector(x)
     # Backward.
     loss_D.mul(gain).backward()
 
     with torch.no_grad():
         grad_norm_lower_bound = (1 + x.flatten(start_dim=1).norm(dim=1)).square().reciprocal().mean()
-        grad_norm = (x.grad.flatten(start_dim=1).norm(dim=1) * x.shape[0] / 2).mean()
+        grad_norm = collector.norm * x.shape[0] / 2
         margin = grad_norm - grad_norm_lower_bound
-        loss_meter.append('misc/grad_norm_lower_bound', grad_norm_lower_bound.cpu())
-        loss_meter.append('misc/grad_norm', grad_norm.cpu())
-        loss_meter.append('misc/margin', margin.cpu())
+        meter.append('misc/grad_norm_lower_bound', grad_norm_lower_bound.cpu())
+        meter.append('misc/grad_norm', grad_norm.cpu())
+        meter.append('misc/margin', margin.cpu())
 
 
 def train_G(
     device,                 # torch device.
-    loss_meter,             # Meter for recording loss value.
+    meter,                  # Meter for recording loss value.
     D,                      # Discriminator.
     G,                      # Generator.
     loss_fn,                # Loss function.
@@ -164,28 +132,20 @@ def train_G(
     n_classes: int,         # Number of classes in the dataset.
     z_dim: int,             # Dimension of latent space.
     gn_impl: str,           # The implementation name of gradient normalization
-    use_gn: bool,           # Whether to use gradient normalization.
-    use_fn: bool,           # Whether to use functional normalized GN.
-    use_gn_G: bool,         # Whether to use gradient normalization in G.
-    c: float,               #
     **kwargs,
 ):
     z = torch.randn(bs_G, z_dim, device=device)
     y = torch.randint(n_classes, (bs_G,), device=device)
     fake = G(z, y)
-    if use_gn or use_gn_G:
-        if gn_impl == 'norm_G':
-            scores = gn.normalize_G(D, fake, loss_fn, use_fn, c, y=y)
-            loss_G = scores.mean()
-        else:
-            scores = gn.normalize_D(D, fake, loss_fn, use_fn, c, y=y)
-            loss_G = loss_fn(scores)
+    if gn_impl == 'norm_G':
+        scores, _ = gn.normalize_G(D, fake, loss_fn, y=y)
+        loss_G = scores.mean()
     else:
-        scores = D(fake, y=y)
+        scores, _ = gn.normalize_D(D, fake, loss_fn, y=y)
         loss_G = loss_fn(scores)
     loss_G.mul(gain).backward()
 
-    loss_meter.append('loss/G', loss_G.detach().cpu())
+    meter.append('loss/G', loss_G.detach().cpu())
 
 
 def training_loop(
@@ -213,16 +173,8 @@ def training_loop(
     beta0: float,           # Beta0 of the Adam optimizer.
     beta1: float,           # Beta1 of the Adam optimizer.
     cr_gamma: float,        # Consistency regularization gamma.
-    gp0_gamma: float,       # 0 Gradient penalty gamma.
-    gp1_gamma: float,       # 1 Gradient penalty gamma.
-    gps_gamma: float,       # sign Gradient penalty gamma.
     gn_impl: str,           # The implementation name of gradient normalization
-    use_gn: bool,           # Whether to use gradient normalization.
-    use_fn: bool,           # Whether to use functional normalized GN.
-    use_gn_D: bool,         # Whether to use gradient normalization in D.
-    use_gn_G: bool,         # Whether to use gradient normalization in G,
     rescale_alpha: float,   # Alpha parameter of the rescaling.
-    c,
     ema_decay: float,       # Decay rate of the exponential moving average.
     ema_start: int,         # Start iteration of the exponential moving average.
     sample_step: int,       # Sample from fixed z every sample_step iterations.
@@ -268,7 +220,7 @@ def training_loop(
         G_ema = torch.nn.SyncBatchNorm.convert_sync_batchnorm(G_ema)
         G_ema = torch.nn.parallel.DistributedDataParallel(
             G_ema, device_ids=[rank], output_device=rank)
-    # This must be done after the initialization of DistributedDataParallel
+    # This must be done after the initialization of DDP.
     G_ema.requires_grad_(False)
 
     # Initialize Optimizer.
@@ -291,10 +243,12 @@ def training_loop(
     # tf board writer.
     if rank == 0:
         writer = SummaryWriter(logdir)
+        # collect the norm of forward of each layer and the norm of gradient
+        # w.r.t each parameter.
         if is_ddp:
-            collector = misc.collect_forward_backward_norm(D.module)
+            collector = misc.Collector(D.module)
         else:
-            collector = misc.collect_forward_backward_norm(D)
+            collector = misc.Collector(D)
 
     if not resume:
         # Sample fixed random noises and classes.
@@ -332,6 +286,7 @@ def training_loop(
         best = ckpt['best']
         del ckpt
 
+    # This must be done after the config file is saved.
     kwargs['bs_D'] //= (accumulation * num_gpus)
     kwargs['bs_G'] //= (accumulation * num_gpus)
 

@@ -18,8 +18,8 @@ def test_model_rescaling():
         print(f"{family}(resolution={res}, n_classes={n_classes})")
         x = torch.randn(1, 3, res, res, requires_grad=True).cuda()
         y = torch.randint(n_classes, (1,)).cuda()
-        net_D = Model(res, n_classes).cuda()
-        f = net_D(x, y=y)
+        D = Model(res, n_classes).cuda()
+        f = D(x, y=y)
         grad_f = torch.autograd.grad(f.sum(), x)[0]
         grad_norm = torch.norm(torch.flatten(grad_f, start_dim=1), p=2, dim=1)
         grad_norm = grad_norm.view(-1, 1)
@@ -36,8 +36,8 @@ def test_model_rescaling():
 
         # Test with different alpha
         for step, alpha in enumerate(alpha_range):
-            net_D.rescale(alpha=alpha)
-            f_scaled = net_D(x, y=y)
+            D.rescale(alpha=alpha)
+            f_scaled = D(x, y=y)
             grad_f_scaled = torch.autograd.grad(f_scaled.sum(), x)[0]
             grad_norm_scaled = torch.norm(
                 torch.flatten(grad_f_scaled, start_dim=1), p=2, dim=1)
