@@ -75,13 +75,17 @@ class Dataset(torch.utils.data.Dataset):
               help='Path to the output lmdb.')
 def files_to_lmdb(dataset, output):
 
-    if dataset in ['cifar10', 'stl10']:
+    if dataset in ['cifar10', 'stl10', 'church', 'bedroom', 'horse', 'cat']:
         if dataset == 'cifar10':
             pt_dataset = torchvision.datasets.CIFAR10(
                 root='/tmp', train=True, download=True)
-        if dataset == 'stl10':
+        elif dataset == 'stl10':
             pt_dataset = torchvision.datasets.STL10(
                 root='/tmp', split='unlabeled', download=True)
+        else:
+            pt_dataset = torchvision.datasets.LSUNClass(
+                os.path.join('./data/lsun', dataset),
+                target_transform=lambda x: 0)
         os.makedirs(os.path.dirname(output), exist_ok=True)
         with lmdb.open(output, map_size=1024 ** 4, readahead=False) as env:
             with env.begin(write=True) as txn:
@@ -107,10 +111,12 @@ def files_to_lmdb(dataset, output):
         files_in_subdir = sorted(files_in_subdir)
         files_in_curdir = sorted(files_in_curdir)
         if len(files_in_subdir) > 0:
+            # Each directory is a class.
             subdirs = set(os.path.basename(os.path.dirname(f)) for f in files_in_subdir)
             dir2cls = {d: i for i, d in enumerate(subdirs)}
             files = files_in_subdir
         else:
+            # All files are belonging to the same class.
             assert len(files_in_curdir) > 0, 'No files found in the specified path.'
             dir2cls = {os.path.basename(os.path.dirname(files_in_curdir[0])): 0}
             files = files_in_curdir
