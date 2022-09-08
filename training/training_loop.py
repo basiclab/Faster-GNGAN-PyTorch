@@ -90,7 +90,7 @@ def train_D(
         images_fake = G(z, classes_fake)
     x = torch.cat([images_real, images_fake], dim=0)
     y = torch.cat([classes_real, classes_fake], dim=0)
-    scores, grad_norm = gn.normalize_D(D, x, loss_fn, y=y)
+    scores, norm_nabla_fx = gn.normalize_D(D, x, loss_fn, y=y)
     scores_real, scores_fake = torch.split(scores, bs_D)
     loss_fake, loss_real = loss_fn(scores_fake, scores_real)
     loss_D = loss_fake + loss_real
@@ -98,7 +98,7 @@ def train_D(
     meter.append('loss/D', (loss_fake + loss_real).detach().cpu())
     meter.append('loss/D/real', loss_real.detach().cpu())
     meter.append('loss/D/fake', loss_fake.detach().cpu())
-    meter.append('norm/grad_fx_norm', grad_norm.detach().mean().cpu())
+    meter.append('norm/nabla_fx', norm_nabla_fx.detach().mean().cpu())
 
     # Consistency Regularization.
     if cr_gamma > 0:

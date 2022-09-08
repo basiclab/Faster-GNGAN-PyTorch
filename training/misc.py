@@ -8,21 +8,20 @@ import numpy as np
 import torch
 
 
-def CommandAwareConfig(config_param_name):
-    class CustomCommandClass(click.Command):
-        def invoke(self, ctx):
-            config_file = ctx.params[config_param_name]
-            if config_file is None:
-                return super(CustomCommandClass, self).invoke(ctx)
-            with open(config_file) as f:
-                configs = json.load(f)
-            for param in ctx.params.keys():
-                if ctx.get_parameter_source(param) != click.core.ParameterSource.DEFAULT:
-                    continue
-                if param in configs:
-                    ctx.params[param] = configs[param]
-            return super(CustomCommandClass, self).invoke(ctx)
-    return CustomCommandClass
+class CommandAwareConfig(click.Command):
+    def invoke(self, ctx):
+        """Load config from file and overwrite by command line arguments."""
+        config_file = ctx.params["config"]
+        if config_file is None:
+            return super(CommandAwareConfig, self).invoke(ctx)
+        with open(config_file) as f:
+            configs = json.load(f)
+        for param in ctx.params.keys():
+            if ctx.get_parameter_source(param) != click.core.ParameterSource.DEFAULT:
+                continue
+            if param in configs:
+                ctx.params[param] = configs[param]
+        return super(CommandAwareConfig, self).invoke(ctx)
 
 
 def set_seed(seed):
@@ -139,7 +138,7 @@ if __name__ == '__main__':
 
     loss_fn = WGANLoss()
     D = Discriminator(32, None)
-    collector = collect_forward_backward_norm(D)
+    collector = Collector(D)
     x = torch.randn(2, 3, 32, 32, requires_grad=True)
     y = normalize_D(D, x, None)
     y.mean().backward()

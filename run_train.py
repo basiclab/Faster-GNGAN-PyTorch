@@ -8,7 +8,7 @@ from training import training_loop
 from training import misc
 
 
-@click.command(cls=misc.CommandAwareConfig('config'))
+@click.command(cls=misc.CommandAwareConfig)
 @click.option('--config', default=None, type=str)
 @click.option('--resume/--no-resume', default=False)
 @click.option('--logdir', default='./logs/GN_cifar10_resnet')
