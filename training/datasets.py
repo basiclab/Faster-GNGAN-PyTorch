@@ -74,7 +74,6 @@ class Dataset(torch.utils.data.Dataset):
 @click.option('-o', '--output', type=str, required=True,
               help='Path to the output lmdb.')
 def files_to_lmdb(dataset, output):
-
     if dataset in ['cifar10', 'stl10', 'church', 'bedroom', 'horse', 'cat']:
         if dataset == 'cifar10':
             pt_dataset = torchvision.datasets.CIFAR10(

@@ -266,7 +266,7 @@ def training_loop(
             # Save arguments fo config.json
             with open(os.path.join(logdir, "config.json"), 'w') as f:
                 json.dump(kwargs, f, indent=2, sort_keys=True)
-            samples = [dataset[i][0] for i in range(sample_size)]
+            samples = [(dataset[i][0] + 1) / 2 for i in range(sample_size)]
             writer.add_image('real', torchvision.utils.make_grid(samples))
             writer.flush()
     else:
