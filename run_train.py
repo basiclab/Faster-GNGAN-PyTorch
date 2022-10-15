@@ -32,6 +32,7 @@ from training import misc
 @click.option('--beta0', default=0.0)
 @click.option('--beta1', default=0.9)
 @click.option('--cr_gamma', default=0.0)
+@click.option('--gp_gamma', default=0.0)
 @click.option('--gn_impl', type=click.Choice(['norm_G', 'norm_D']), default='norm_G')
 @click.option('--rescale_alpha', default=None, type=float)
 @click.option('--ema_decay', default=0.9999)
@@ -45,29 +46,29 @@ from training import misc
 @click.option('--seed', default=0)
 def main(**kwargs):
     num_gpus = len(os.environ.get('CUDA_VISIBLE_DEVICES', "0").split(','))
-    if num_gpus == 1:
-        subprocess_fn(0, num_gpus, kwargs)
-    else:
+    if num_gpus > 1:
         with tempfile.TemporaryDirectory() as temp_dir:
             processes = []
             for rank in range(num_gpus):
                 p = torch.multiprocessing.Process(
-                    target=subprocess_fn, args=(rank, num_gpus, kwargs, temp_dir))
+                    target=subprocess_fn,
+                    args=(rank, num_gpus, temp_dir, kwargs))
                 p.start()
                 processes.append(p)
             for p in processes:
                 p.join()
+    else:
+        training_loop.training_loop(**kwargs, kwargs=kwargs)
 
 
-def subprocess_fn(rank, num_gpus, kwargs, temp_dir=None):
-    if num_gpus > 1:
-        init_file = os.path.abspath(os.path.join(temp_dir, '.torch_distributed_init'))
-        init_method = f'file://{init_file}'
-        torch.distributed.init_process_group(backend='nccl', init_method=init_method, rank=rank, world_size=num_gpus)
-        print("Node %d is initialized" % rank)
+def subprocess_fn(rank, num_gpus, temp_dir, kwargs):
+    init_file = os.path.abspath(os.path.join(temp_dir, '.torch_distributed_init'))
+    init_method = f'file://{init_file}'
+    torch.distributed.init_process_group('nccl', init_method, rank=rank, world_size=num_gpus)
+    print("Node %d is initialized" % rank)
     torch.cuda.set_device(rank)
     torch.cuda.empty_cache()
-    training_loop.training_loop(rank, num_gpus, kwargs=kwargs, **kwargs)
+    training_loop.training_loop(**kwargs, kwargs=kwargs)
 
 
 if __name__ == '__main__':

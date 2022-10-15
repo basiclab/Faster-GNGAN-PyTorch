@@ -1,4 +1,3 @@
-import contextlib
 import importlib
 import json
 import random
@@ -19,7 +18,7 @@ class CommandAwareConfig(click.Command):
         for param in ctx.params.keys():
             if ctx.get_parameter_source(param) != click.core.ParameterSource.DEFAULT:
                 continue
-            if param in configs:
+            if param != "config" and param in configs:
                 ctx.params[param] = configs[param]
         return super(CommandAwareConfig, self).invoke(ctx)
 
@@ -38,22 +37,13 @@ def construct_class(module, *args, **kwargs):
     return getattr(importlib.import_module(module), class_name)(*args, **kwargs)
 
 
-@contextlib.contextmanager
-def ddp_sync(module, sync):
-    if sync or not isinstance(module, torch.nn.parallel.DistributedDataParallel):
-        yield
-    else:
-        with module.no_sync():
-            yield
-
-
 class Collector(object):
     def __init__(self, module):
         self.hooks = dict()
 
         for name, m in module.named_modules():
             if len(m._parameters) > 0:
-                forward_key = f"norm/forward/1/{name}"
+                forward_key = f"norm/forward/{name}"
                 self.hooks[forward_key] = self.ForwardHook()
                 m.register_forward_hook(self.hooks[forward_key])
 

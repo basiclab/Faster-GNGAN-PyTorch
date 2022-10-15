@@ -1,34 +1,34 @@
 import copy
-from gc import collect
 import json
 import os
-from random import sample, shuffle
 
 import torch
 import torchvision
 from pytorch_gan_metrics import get_fid
 from tensorboardX import SummaryWriter
+from torch.nn import SyncBatchNorm
+from torch.nn.parallel import DistributedDataParallel
+from torch.utils.data import RandomSampler
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import trange, tqdm
 
 from training import datasets
 from training import misc
 from training import gn
+from training import dist
 
 
 def infiniteloop(dataloader, sampler):
     epoch = 0
     while True:
-        sampler.set_epoch(epoch)
+        if isinstance(sampler, DistributedSampler):
+            sampler.set_epoch(epoch)
         for x in dataloader:
             yield x
         epoch += 1
 
 
 def fid(
-    device,                 # torch device.
-    rank,                   # Rank of the current process in [0, num_gpus[.
-    num_gpus,               # Number of GPUs participating in the training.
     G,                      # Generator.
     bs_G: int,              # Batch size for G.
     z_dim: int,             # Dimension of latent space.
@@ -37,33 +37,31 @@ def fid(
     fid_stats: str,         # Path to the FID statistics.
     **kwargs
 ):
+    device = dist.device()
     imgs = []
     progress = tqdm(
         total=eval_size,
         ncols=0,
         desc="Generating",
         leave=False,
-        disable=rank != 0)
-    for _ in range(0, eval_size, bs_G * num_gpus):
+        disable=not dist.is_main())
+    for _ in range(0, eval_size, bs_G * dist.num_gpus()):
         z = torch.randn(bs_G, z_dim, device=device)
         y = torch.randint(n_classes, (bs_G,), device=device)
         with torch.no_grad():
             batch_imgs = (G(z, y) + 1) / 2
-        if num_gpus > 1:
-            buf = [torch.empty_like(batch_imgs) for _ in range(num_gpus)]
-            torch.distributed.all_gather(buf, batch_imgs)
-            batch_imgs = torch.cat(buf, dim=0).cpu()
-        imgs.append(batch_imgs)
-        progress.update(bs_G * num_gpus)
+            batch_imgs = dist.gather(batch_imgs)
+        if dist.is_main():
+            imgs.append(batch_imgs.cpu())
+            progress.update(bs_G * dist.num_gpus())
     progress.close()
-    if rank == 0:
+    if dist.is_main():
         imgs = torch.cat(imgs, dim=0)[:eval_size]
         assert len(imgs) == eval_size
         FID = get_fid(imgs, fid_stats, verbose=True)
     else:
         FID = None
-    if num_gpus > 1:
-        torch.distributed.barrier()
+    dist.barrier()
     del imgs
     return FID
 
@@ -80,6 +78,7 @@ def train_D(
     n_classes: int,         # Number of classes in the dataset.
     z_dim: int,             # Dimension of latent space.
     cr_gamma: float,        # Consistency regularization gamma.
+    gp_gamma: float,        # Gradient penalty gamma.
     **kwargs,
 ):
     images_real, classes_real, images_aug = next(loader)
@@ -93,7 +92,7 @@ def train_D(
     scores, norm_nabla_fx = gn.normalize_D(D, x, loss_fn, y=y)
     scores_real, scores_fake = torch.split(scores, bs_D)
     loss_fake, loss_real = loss_fn(scores_fake, scores_real)
-    loss_D = loss_fake + loss_real
+    loss_D = loss_fake + loss_real + gp_gamma * norm_nabla_fx.square().mean()
 
     meter.append('loss/D', (loss_fake + loss_real).detach().cpu())
     meter.append('loss/D/real', loss_real.detach().cpu())
@@ -149,8 +148,6 @@ def train_G(
 
 
 def training_loop(
-    rank: int,              # Rank of the current process in [0, num_gpus[.
-    num_gpus: int,          # Number of GPUs participating in the training.
     resume: bool,           # Whether to resume training from a logdir.
     logdir: str,            # Directory where to save the model and tf board.
     data_path: str,         # Path to the dataset.
@@ -173,6 +170,7 @@ def training_loop(
     beta0: float,           # Beta0 of the Adam optimizer.
     beta1: float,           # Beta1 of the Adam optimizer.
     cr_gamma: float,        # Consistency regularization gamma.
+    gp_gamma: float,        # Gradient penalty gamma.
     gn_impl: str,           # The implementation name of gradient normalization
     rescale_alpha: float,   # Alpha parameter of the rescaling.
     ema_decay: float,       # Decay rate of the exponential moving average.
@@ -187,15 +185,18 @@ def training_loop(
     kwargs: dict,           # All arguments for dumping to the config file.
     **dummy,
 ):
-    assert bs_D % (accumulation * num_gpus) == 0, "bs_D is not divisible by (accumulation * num_gpus)"
-    assert bs_G % (accumulation * num_gpus) == 0, "bs_G is not divisible by (accumulation * num_gpus)"
-    bs_D = bs_D // (accumulation * num_gpus)
-    bs_G = bs_G // (accumulation * num_gpus)
-    misc.set_seed(rank + seed)
+    assert bs_D % (accumulation * dist.num_gpus()) == 0, "bs_D is not divisible by (accumulation * num_gpus)"
+    assert bs_G % (accumulation * dist.num_gpus()) == 0, "bs_G is not divisible by (accumulation * num_gpus)"
+    bs_D = bs_D // (accumulation * dist.num_gpus())
+    bs_G = bs_G // (accumulation * dist.num_gpus())
+    misc.set_seed(dist.rank() + seed)
 
-    device = torch.device('cuda:%d' % rank)
+    device = dist.device()
     dataset = datasets.Dataset(data_path, hflip, resolution, cr_gamma > 0)
-    sampler = DistributedSampler(dataset, num_gpus, rank, seed=seed, drop_last=True)
+    if dist.is_initialized():
+        sampler = DistributedSampler(dataset, seed=seed, drop_last=True)
+    else:
+        sampler = RandomSampler(dataset)
     loader = torch.utils.data.DataLoader(
         dataset=dataset,
         batch_size=bs_D,
@@ -208,20 +209,6 @@ def training_loop(
     D = misc.construct_class(architecture_D, resolution, n_classes).to(device)
     G = misc.construct_class(architecture_G, resolution, n_classes, z_dim).to(device)
     G_ema = copy.deepcopy(G)
-
-    # Initialize models for multi-gpu training.
-    is_ddp = num_gpus > 1
-    if is_ddp:
-        D = torch.nn.parallel.DistributedDataParallel(
-            D, device_ids=[rank], output_device=rank)
-        G = torch.nn.SyncBatchNorm.convert_sync_batchnorm(G)
-        G = torch.nn.parallel.DistributedDataParallel(
-            G, device_ids=[rank], output_device=rank)
-        G_ema = torch.nn.SyncBatchNorm.convert_sync_batchnorm(G_ema)
-        G_ema = torch.nn.parallel.DistributedDataParallel(
-            G_ema, device_ids=[rank], output_device=rank)
-    # This must be done after the initialization of DDP.
-    G_ema.requires_grad_(False)
 
     # Initialize Optimizer.
     D_opt = torch.optim.Adam(D.parameters(), lr=lr_D, betas=[beta0, beta1])
@@ -241,11 +228,11 @@ def training_loop(
     loss_fn_G = misc.construct_class(loss_G)
 
     # tf board writer.
-    if rank == 0:
+    if dist.is_main():
         writer = SummaryWriter(logdir)
         # collect the norm of forward of each layer and the norm of gradient
         # w.r.t each parameter.
-        if is_ddp:
+        if isinstance(D, DistributedDataParallel):
             collector = misc.Collector(D.module)
         else:
             collector = misc.Collector(D)
@@ -253,16 +240,16 @@ def training_loop(
     if not resume:
         # Sample fixed random noises and classes.
         fixed_z = torch.randn(sample_size, z_dim, device=device)
-        fixed_z = torch.split(fixed_z, sample_size // num_gpus, dim=0)
+        fixed_z = torch.split(fixed_z, sample_size // dist.num_gpus(), dim=0)
         fixed_y = torch.randint(n_classes, (sample_size,), device=device)
-        fixed_y = torch.split(fixed_y, sample_size // num_gpus, dim=0)
+        fixed_y = torch.split(fixed_y, sample_size // dist.num_gpus(), dim=0)
         # Initialize iteration and best results.
         start_step = 0
         best = {
             'FID/best': float('inf'),
             'FID/ema/best': float('inf'),
         }
-        if rank == 0:
+        if dist.is_main():
             # Save arguments fo config.json
             with open(os.path.join(logdir, "config.json"), 'w') as f:
                 json.dump(kwargs, f, indent=2, sort_keys=True)
@@ -279,16 +266,26 @@ def training_loop(
         D_lrsched.load_state_dict(ckpt['D_lrsched'])
         G_lrsched.load_state_dict(ckpt['G_lrsched'])
         fixed_z = ckpt['fixed_z'].to(device)
-        fixed_z = torch.split(fixed_z, sample_size // num_gpus, dim=0)
+        fixed_z = torch.split(fixed_z, sample_size // dist.num_gpus(), dim=0)
         fixed_y = ckpt['fixed_y'].to(device)
-        fixed_y = torch.split(fixed_y, sample_size // num_gpus, dim=0)
+        fixed_y = torch.split(fixed_y, sample_size // dist.num_gpus(), dim=0)
         start_step = ckpt['step']
         best = ckpt['best']
         del ckpt
 
+    # Initialize models for multi-gpu training.
+    if dist.is_initialized():
+        D = DistributedDataParallel(D, device_ids=[dist.device()])
+        G = SyncBatchNorm.convert_sync_batchnorm(G)
+        G = DistributedDataParallel(G, device_ids=[dist.device()])
+        G_ema = SyncBatchNorm.convert_sync_batchnorm(G_ema)
+        G_ema = DistributedDataParallel(G_ema, device_ids=[dist.device()])
+    # This must be done after the initialization of DDP.
+    G_ema.requires_grad_(False)
+
     # This must be done after the config file is saved.
-    kwargs['bs_D'] //= (accumulation * num_gpus)
-    kwargs['bs_G'] //= (accumulation * num_gpus)
+    kwargs['bs_D'] //= (accumulation * dist.num_gpus())
+    kwargs['bs_G'] //= (accumulation * dist.num_gpus())
 
     progress = trange(
         start_step + 1,         # Initial step value.
@@ -297,7 +294,7 @@ def training_loop(
         total=steps,            # The progress size.
         ncols=0,                # Disable bar, only show steps and percentage.
         desc='Training',
-        disable=(rank != 0))
+        disable=not dist.is_main())
 
     for step in progress:
         meter = misc.Meter()
@@ -306,12 +303,12 @@ def training_loop(
         D.requires_grad_(True)
         for _ in range(step_D):
             if rescale_alpha is not None:
-                if is_ddp:
+                if isinstance(D, DistributedDataParallel):
                     D.module.rescale(alpha=rescale_alpha)
                 else:
                     D.rescale(alpha=rescale_alpha)
             for i in range(accumulation):
-                with misc.ddp_sync(D, sync=(i == accumulation - 1)):
+                with dist.ddp_sync(D, sync=(i == accumulation - 1)):
                     train_D(device, loader, meter, D, G, loss_fn_D,
                             gain=1 / accumulation, **kwargs)
             D_opt.step()
@@ -320,14 +317,14 @@ def training_loop(
         D.requires_grad_(False)
 
         # Record the last forward and backward pass of D.
-        if rank == 0:
+        if dist.is_main():
             for tag, value in collector.norms():
                 writer.add_scalar(tag, value, step)
 
         # Update G.
         G.requires_grad_(True)
         for i in range(accumulation):
-            with misc.ddp_sync(G, sync=(i == accumulation - 1)):
+            with dist.ddp_sync(G, sync=(i == accumulation - 1)):
                 train_G(device, meter, D, G, loss_fn_G,
                         gain=1 / accumulation, **kwargs)
         G_opt.step()
@@ -344,7 +341,7 @@ def training_loop(
                 G_ema_dict[name].data * ema_beta + G_dict[name].data * (1 - ema_beta))
 
         # Update tf board and progress bar
-        if rank == 0:
+        if dist.is_main():
             losses = meter.todict()
             for tag, value in losses.items():
                 writer.add_scalar(tag, value, step)
@@ -358,24 +355,23 @@ def training_loop(
         # Generate images from fixed z every sample_step steps.
         if step == 1 or step % sample_step == 0:
             with torch.no_grad():
-                imgs = (G(fixed_z[rank], fixed_y[rank]) + 1) / 2
-                imgs_ema = (G_ema(fixed_z[rank], fixed_y[rank]) + 1) / 2
-            if is_ddp:
-                buf = [torch.empty_like(imgs) for _ in range(num_gpus)]
-                buf_ema = [torch.empty_like(imgs_ema) for _ in range(num_gpus)]
-                torch.distributed.all_gather(buf, imgs)
-                torch.distributed.all_gather(buf_ema, imgs_ema)
-                imgs = torch.cat(buf, dim=0).cpu()
-                imgs_ema = torch.cat(buf_ema, dim=0).cpu()
-            if rank == 0:
-                writer.add_image('fake', torchvision.utils.make_grid(imgs), step)
-                writer.add_image('fake/ema', torchvision.utils.make_grid(imgs_ema), step)
+                imgs = G(fixed_z[dist.rank()], fixed_y[dist.rank()])
+                imgs = (imgs + 1) / 2
+                imgs_ema = G_ema(fixed_z[dist.rank()], fixed_y[dist.rank()])
+                imgs_ema = (imgs_ema + 1) / 2
+            imgs = dist.gather(imgs)
+            imgs_ema = dist.gather(imgs_ema)
+            if dist.is_main():
+                writer.add_image(
+                    'fake', torchvision.utils.make_grid(imgs.cpu()), step)
+                writer.add_image(
+                    'fake/ema', torchvision.utils.make_grid(imgs_ema.cpu()), step)
 
         # Calculate FID every eval_step steps.
         if step == 1 or step % eval_step == 0:
-            FID = fid(device, rank, num_gpus, G, **kwargs)
-            FID_ema = fid(device, rank, num_gpus, G_ema, **kwargs)
-            if rank == 0:
+            FID = fid(G, **kwargs)
+            FID_ema = fid(G_ema, **kwargs)
+            if dist.is_main():
                 if FID < best['FID/best']:
                     best['FID/best'] = FID
                     save_best_model = True
@@ -386,10 +382,19 @@ def training_loop(
                     save_best_ema_model = True
                 else:
                     save_best_ema_model = False
-                ckpt = {
-                    'G': G.state_dict(),
-                    'D': D.state_dict(),
-                    'G_ema': G_ema.state_dict(),
+                if dist.is_initialized():
+                    ckpt = {
+                        'G': G.module.state_dict(),
+                        'D': D.module.state_dict(),
+                        'G_ema': G_ema.module.state_dict(),
+                    }
+                else:
+                    ckpt = {
+                        'G': G.state_dict(),
+                        'D': D.state_dict(),
+                        'G_ema': G_ema.state_dict(),
+                    }
+                ckpt.update({
                     'G_opt': G_opt.state_dict(),
                     'D_opt': D_opt.state_dict(),
                     'G_lrsched': G_lrsched.state_dict(),
@@ -398,7 +403,7 @@ def training_loop(
                     'fixed_y': torch.cat(fixed_y, dim=0),
                     'best': best,
                     'step': step,
-                }
+                })
                 torch.save(ckpt, os.path.join(logdir, 'model.pt'))
                 if save_best_model:
                     torch.save(ckpt, os.path.join(logdir, 'best.pt'))
@@ -424,6 +429,6 @@ def training_loop(
                     f"FID/ema: {FID_ema:.3f}",
                 ]))
 
-    if rank == 0:
+    if dist.is_main():
         progress.close()
         writer.close()

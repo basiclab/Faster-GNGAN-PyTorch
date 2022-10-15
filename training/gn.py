@@ -1,7 +1,7 @@
 import torch
 
 
-class GradUpdateHook(object):
+class GradUpdateHook:
     def __init__(self, f, x, loss_fn):
         self.f = f[:, 0]        # [B, 1] -> [B]
         self.loss_fn = loss_fn
