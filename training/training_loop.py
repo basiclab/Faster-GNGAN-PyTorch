@@ -189,6 +189,7 @@ def training_loop(
     assert bs_G % (accumulation * dist.num_gpus()) == 0, "bs_G is not divisible by (accumulation * num_gpus)"
     bs_D = bs_D // (accumulation * dist.num_gpus())
     bs_G = bs_G // (accumulation * dist.num_gpus())
+    gain = 1 / accumulation
     misc.set_seed(dist.rank() + seed)
 
     device = dist.device()
@@ -309,8 +310,7 @@ def training_loop(
                     D.rescale(alpha=rescale_alpha)
             for i in range(accumulation):
                 with dist.ddp_sync(D, sync=(i == accumulation - 1)):
-                    train_D(device, loader, meter, D, G, loss_fn_D,
-                            gain=1 / accumulation, **kwargs)
+                    train_D(loader, meter, D, G, loss_fn_D, gain, **kwargs)
             D_opt.step()
             D_opt.zero_grad(set_to_none=True)
         D_lrsched.step()
@@ -325,8 +325,7 @@ def training_loop(
         G.requires_grad_(True)
         for i in range(accumulation):
             with dist.ddp_sync(G, sync=(i == accumulation - 1)):
-                train_G(device, meter, D, G, loss_fn_G,
-                        gain=1 / accumulation, **kwargs)
+                train_G(meter, D, G, loss_fn_G, gain, **kwargs)
         G_opt.step()
         G_opt.zero_grad(set_to_none=True)
         G_lrsched.step()
