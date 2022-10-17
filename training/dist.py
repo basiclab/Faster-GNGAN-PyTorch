@@ -56,7 +56,8 @@ def gather(tensor: torch.Tensor):
 
 
 @contextlib.contextmanager
-def ddp_sync(module, sync):
+def ddp_sync(module, sync: bool):
+    """Context manager to control the sync of gradients across processes."""
     if sync or not isinstance(module, torch.nn.parallel.DistributedDataParallel):
         yield
     else:

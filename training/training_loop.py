@@ -67,7 +67,6 @@ def fid(
 
 
 def train_D(
-    device,                 # torch device.
     loader,                 # Iterator of DataLoader.
     meter,                  # Meter for recording loss value.
     D,                      # Discriminator.
@@ -81,6 +80,7 @@ def train_D(
     gp_gamma: float,        # Gradient penalty gamma.
     **kwargs,
 ):
+    device = dist.device()
     images_real, classes_real, images_aug = next(loader)
     images_real, classes_real = images_real.to(device), classes_real.to(device)
     z = torch.randn(bs_D, z_dim, device=device)
@@ -121,7 +121,6 @@ def train_D(
 
 
 def train_G(
-    device,                 # torch device.
     meter,                  # Meter for recording loss value.
     D,                      # Discriminator.
     G,                      # Generator.
@@ -133,6 +132,7 @@ def train_G(
     gn_impl: str,           # The implementation name of gradient normalization
     **kwargs,
 ):
+    device = dist.device()
     z = torch.randn(bs_G, z_dim, device=device)
     y = torch.randint(n_classes, (bs_G,), device=device)
     fake = G(z, y)
