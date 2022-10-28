@@ -92,12 +92,18 @@ def train_D(
     scores, norm_nabla_fx = gn.normalize_D(D, x, loss_fn, y=y)
     scores_real, scores_fake = torch.split(scores, bs_D)
     loss_fake, loss_real = loss_fn(scores_fake, scores_real)
-    loss_D = loss_fake + loss_real + gp_gamma * norm_nabla_fx.square().mean()
+    loss_D = loss_fake + loss_real
 
     meter.append('loss/D', (loss_fake + loss_real).detach().cpu())
     meter.append('loss/D/real', loss_real.detach().cpu())
     meter.append('loss/D/fake', loss_fake.detach().cpu())
     meter.append('norm/nabla_fx', norm_nabla_fx.detach().mean().cpu())
+
+    # Gradient Penalty
+    if gp_gamma > 0:
+        loss_gp = norm_nabla_fx.square().mean()
+        loss_D += loss_gp.mul(gp_gamma)
+        meter.append('loss/D/gp', loss_gp.detach().cpu())
 
     # Consistency Regularization.
     if cr_gamma > 0:
