@@ -1,6 +1,6 @@
 {
     "logdir": "./logs/GN_bedroom256_resnet_0",
-    "data_path": "./data/bedroom",
+    "data_path": "./data/lsun/bedroom_train_lmdb",
     "hflip": true,
     "resolution": 256,
     "n_classes": 1,
@@ -16,7 +16,6 @@
     "lr_D": 0.0002,
     "lr_G": 0.0002,
     "lr_decay": false,
-    "use_gn": true,
     "ema_decay": 0.9999,
     "ema_start": 20000,
     "eval_step": 1000,

@@ -17,7 +17,6 @@
     "lr_G": 0.0002,
     "lr_decay": true,
     "cr_gamma": 5.0,
-    "use_gn": true,
     "ema_decay": 0.9999,
     "ema_start": 0,
     "fid_stats": "./stats/stl10.unlabeled.48.npz"
