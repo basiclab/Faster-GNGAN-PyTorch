@@ -5,6 +5,7 @@ import click
 import torch
 
 from training import training_loop
+from training import testing
 from training import misc
 
 
@@ -44,6 +45,10 @@ from training import misc
 @click.option('--fid_stats', default='./stats/cifar10.train.npz')
 @click.option('--save_step', default=20000)
 @click.option('--seed', default=0)
+# evaluation
+@click.option('--test_only/--no-test_only', default=False)
+@click.option('--output', type=str, default=None)
+@click.option('--ema/--no-ema', default=False)
 def main(**kwargs):
     num_gpus = len(os.environ.get('CUDA_VISIBLE_DEVICES', "0").split(','))
     if num_gpus > 1:
@@ -58,7 +63,10 @@ def main(**kwargs):
             for p in processes:
                 p.join()
     else:
-        training_loop.training_loop(**kwargs, kwargs=kwargs)
+        if kwargs['test_only']:
+            testing.testing(**kwargs, kwargs=kwargs)
+        else:
+            training_loop.training_loop(**kwargs, kwargs=kwargs)
 
 
 def subprocess_fn(rank, num_gpus, temp_dir, kwargs):
@@ -68,7 +76,10 @@ def subprocess_fn(rank, num_gpus, temp_dir, kwargs):
     print("Node %d is initialized" % rank)
     torch.cuda.set_device(rank)
     torch.cuda.empty_cache()
-    training_loop.training_loop(**kwargs, kwargs=kwargs)
+    if kwargs['test_only']:
+        testing.testing(**kwargs, kwargs=kwargs)
+    else:
+        training_loop.training_loop(**kwargs, kwargs=kwargs)
 
 
 if __name__ == '__main__':
