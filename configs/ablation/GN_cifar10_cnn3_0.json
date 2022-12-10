@@ -1,0 +1,22 @@
+{
+    "logdir": "./logs/Ablation/GN_cifar10_cnn3_0",
+    "data_path": "./data/cifar10",
+    "hflip": true,
+    "resolution": 32,
+    "n_classes": 1,
+    "z_dim": 128,
+    "architecture_D": "training.models.cnn.Discriminator3",
+    "architecture_G": "training.models.dcgan.Generator",
+    "loss_D": "training.losses.NSLoss",
+    "loss_G": "training.losses.NSLoss",
+    "steps": 200000,
+    "step_D": 1,
+    "bs_D": 64,
+    "bs_G": 128,
+    "lr_D": 0.0002,
+    "lr_G": 0.0002,
+    "lr_decay": false,
+    "ema_decay": 0.9999,
+    "ema_start": 0,
+    "fid_stats": "./stats/cifar10.train.npz"
+}

@@ -92,8 +92,8 @@ class RescalableWrapper(Rescalable):
             else:
                 fan_in, fan_out = _calculate_fan_in_and_fan_out(self.module.weight_raw)
                 gain = calculate_gain('relu')
-                # std = gain * math.sqrt(2.0 / (fan_in + fan_out))    # xavier
-                std = gain / math.sqrt(fan_in)                      # kaiming
+                std = gain * math.sqrt(2.0 / (fan_in + fan_out))    # xavier
+                # std = gain / math.sqrt(fan_in)                      # kaiming
                 self.module.weight_scale = std / (self.module.weight_raw.std() + 1e-12)
             base_scale = base_scale * self.module.weight_scale
             if 'bias_raw' in self.module._parameters:

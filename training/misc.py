@@ -1,6 +1,7 @@
 import importlib
 import json
 import random
+from collections import defaultdict
 
 import click
 import numpy as np
@@ -35,6 +36,17 @@ def set_seed(seed):
 def construct_class(module, *args, **kwargs):
     module, class_name = module.rsplit('.', maxsplit=1)
     return getattr(importlib.import_module(module), class_name)(*args, **kwargs)
+
+
+def calc_slop(x, y):
+    x = x.view(x.size(0), -1)
+    y = y.view(y.size(0), -1)
+
+    diff_x = torch.nn.functional.normalize(x[:, None, :] - x[None, :, :])
+    diff_y = torch.nn.functional.normalize(y[:, None, :] - y[None, :, :])
+    slop = torch.max(diff_x / (diff_y + 1e-12))
+
+    return slop
 
 
 class Collector(object):
@@ -107,18 +119,22 @@ class GradFxCollector(object):
 
 class Meter:
     def __init__(self):
-        self.name2list = dict()
+        self.nametype2data = defaultdict(list)
 
-    def append(self, name: str, value: torch.Tensor):
-        value_lst = self.name2list.get(name, [])
-        value_lst.append(value)
-        self.name2list[name] = value_lst
+    def append(self, name: str, value: torch.Tensor, type: str = 'mean'):
+        self.nametype2data[(name, type)].append(value)
 
     def todict(self):
-        return {
-            name: torch.mean(torch.stack(value_lst))
-            for name, value_lst in self.name2list.items()
-        }
+        result = dict()
+        for (name, type), value_lst in self.nametype2data.items():
+            if type == 'mean':
+                value = torch.mean(torch.stack(value_lst))
+            elif type == 'max':
+                value = torch.max(torch.stack(value_lst))
+            else:
+                raise ValueError(f'Unknown type: {type}')
+            result[name] = value
+        return result
 
 
 if __name__ == '__main__':

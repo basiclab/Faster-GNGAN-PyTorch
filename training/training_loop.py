@@ -124,6 +124,7 @@ def train_D(
         meter.append('misc/grad_norm_lower_bound', grad_norm_lower_bound.cpu())
         meter.append('misc/grad_norm', grad_norm.cpu())
         meter.append('misc/margin', margin.cpu())
+        meter.append('misc/slop', misc.calc_slop(x, scores), type='max')
 
 
 def train_G(
