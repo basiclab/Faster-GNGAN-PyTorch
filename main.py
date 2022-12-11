@@ -22,6 +22,8 @@ from training import misc
 @click.option('--architecture_G', 'architecture_G', default='training.models.resnet.Generator')
 @click.option('--loss_D', 'loss_D', default='training.losses.HingeLoss')
 @click.option('--loss_G', 'loss_G', default='training.losses.HingeLoss')
+@click.option('--normalize_D', 'normalize_D', default='training.gn.normalize_D')
+@click.option('--normalize_G', 'normalize_G', default='training.gn.normalize_G')
 @click.option('--steps', default=200000)
 @click.option('--step_D', 'step_D', default=5)
 @click.option('--bs_D', 'bs_D', default=64)

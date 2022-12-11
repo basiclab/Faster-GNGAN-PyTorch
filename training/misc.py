@@ -33,23 +33,23 @@ def set_seed(seed):
     # torch.backends.cudnn.benchmark = False
 
 
-def construct_class(module, *args, **kwargs):
+def dynamic_import(module):
     module, class_name = module.rsplit('.', maxsplit=1)
-    return getattr(importlib.import_module(module), class_name)(*args, **kwargs)
+    return getattr(importlib.import_module(module), class_name)
 
 
 def calc_slop(x, y):
     x = x.view(x.size(0), -1)
     y = y.view(y.size(0), -1)
 
-    diff_x = torch.nn.functional.normalize(x[:, None, :] - x[None, :, :])
-    diff_y = torch.nn.functional.normalize(y[:, None, :] - y[None, :, :])
-    slop = torch.max(diff_x / (diff_y + 1e-12))
+    diff_x = torch.linalg.vector_norm(x[:, None, :] - x[None, :, :], dim=2)
+    diff_y = torch.linalg.vector_norm(y[:, None, :] - y[None, :, :], dim=2)
+    slop = torch.max(diff_y / (diff_x + 1e-12))
 
     return slop
 
 
-class Collector(object):
+class ForwAndParamGradCollector(object):
     def __init__(self, module):
         self.hooks = dict()
 
@@ -106,15 +106,23 @@ class Collector(object):
                 yield tag, hook.norm
 
 
-class GradFxCollector(object):
-    def __init__(self, x: torch.Tensor):
-        self.handle = x.register_hook(self)
-        self.norm = None
+class NablaHatFxCollector(object):
+    def __init__(self, module: torch.nn.Module):
+        self.handle_forward = module.register_forward_pre_hook(self.forward_hook)
+        self.handle_backward = module.register_full_backward_hook(self.backward_hook)
+        self.norm_nabla_hatfx = None
 
     @torch.no_grad()
-    def __call__(self, grad: torch.Tensor):
-        self.norm = grad.flatten(start_dim=1).norm(dim=1).mean()
-        self.handle.remove()
+    def forward_hook(self, module, input):
+        input[0].requires_grad_(True)
+
+    @torch.no_grad()
+    def backward_hook(self, module, input_grad, output_grad):
+        self.norm_nabla_hatfx = input_grad[0].flatten(start_dim=1).norm(dim=1)
+
+    def remove(self):
+        self.handle_forward.remove()
+        self.handle_backward.remove()
 
 
 class Meter:
@@ -139,12 +147,11 @@ class Meter:
 
 if __name__ == '__main__':
     from training.models.dcgan import Discriminator
-    from training.losses import WGANLoss
+    from training.losses import wgan_loss_D
     from training.gn import normalize_D
 
-    loss_fn = WGANLoss()
     D = Discriminator(32, None)
     collector = Collector(D)
     x = torch.randn(2, 3, 32, 32, requires_grad=True)
-    y = normalize_D(D, x, None)
+    y, _, _ = normalize_D(D, x, wgan_loss_D)
     y.mean().backward()

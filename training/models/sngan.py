@@ -188,6 +188,12 @@ if __name__ == '__main__':
     for Discriminators in Discriminators:
         for resolution in [32, 48]:
             D = Discriminators(resolution, None).to(device)
-            x = torch.randn(size=(128, 3, resolution, resolution)).to(device)
-            y = D(x)
-            del D, x, y
+            for _ in range(10):
+                x1 = torch.randn(
+                    size=(128, 3, resolution, resolution), requires_grad=True
+                ).to(device)
+                x2 = x1 + 0.02 * torch.randn_like(x1)
+                y1 = D(x1)
+                y2 = D(x2)
+
+                x1_grad = torch.autograd.grad(y1.sum(), x1)[0]

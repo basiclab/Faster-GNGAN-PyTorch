@@ -2,6 +2,7 @@ import torch
 
 
 class GradUpdateHook:
+    """Faster GN-GAN"""
     def __init__(self, f, x, loss_fn):
         self.f = f[:, 0]        # [B, 1] -> [B]
         self.loss_fn = loss_fn
@@ -11,8 +12,8 @@ class GradUpdateHook:
         f_hat = self.f / (grad_norm + torch.abs(self.f))
         with torch.enable_grad():
             f_hat.requires_grad_(True)
-            loss = self.loss_fn(f_hat)
-            scale = torch.autograd.grad(loss, f_hat)[0] * self.f.shape[0]
+            loss = self.loss_fn(f_hat).sum()
+            scale = torch.autograd.grad(loss, f_hat)[0]
         return scale.view(-1, 1, 1, 1)
 
     def grad_scale(self, grad_norm):
@@ -38,21 +39,45 @@ class GradUpdateHook:
         return grad
 
 
-def normalize_G(D, x, loss_fn, **kwargs):
-    f = D(x, **kwargs)
-    GradUpdateHook(f, x, loss_fn)
-    return f, None
-
-
 def normalize_D(D, x, loss_fn, **kwargs):
     """
+    Apply Gradient Normalization on D with input x.
                      f
     f_hat = -------------------
             || df/dx || + | f |
+
+    Returns:
+        f_hat: discriminator output
+        loss: loss
     """
     x.requires_grad_(True)
     f = D(x, **kwargs)
-    grad = torch.autograd.grad(f, x, torch.ones_like(f), create_graph=True)[0]
+    grad = torch.autograd.grad(f.sum(), x, create_graph=True)[0]
     grad_norm = grad.flatten(start_dim=1).norm(dim=1).view(-1, 1)
     f_hat = f / (grad_norm + torch.abs(f))
-    return f_hat, grad_norm
+    loss = loss_fn(f_hat)
+    return f_hat, loss, grad_norm
+
+
+def normalize_G(D, x, loss_fn, **kwargs):
+    """
+    Returns:
+        f: discriminator output
+        loss: the mean of f
+    """
+    f = D(x, **kwargs)
+    GradUpdateHook(f, x, loss_fn)
+    loss = f
+    return f, loss, None
+
+
+def vanilla_D(D, x, loss_fn, **kwargs):
+    f = D(x, **kwargs)
+    loss = loss_fn(f)
+    return f, loss, None
+
+
+def vanilla_G(D, x, loss_fn, **kwargs):
+    f = D(x, **kwargs)
+    loss = loss_fn(f)
+    return f, loss, None

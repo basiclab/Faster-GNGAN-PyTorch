@@ -87,9 +87,9 @@ def test_loss():
     ]
 
     loss_fns = [
-        losses.NSLoss(),
-        losses.HingeLoss(),
-        losses.WGANLoss(),
+        losses.ns_loss_G,
+        losses.hinge_loss_G,
+        losses.wgan_loss_G,
     ]
 
     c_list = [1, 1.1234]
@@ -107,27 +107,25 @@ def test_loss():
         print("=" * 80)
         D1 = Model(res, n_classes).to(device)
         D2 = copy.deepcopy(D1)
-        for loss_fn in loss_fns:
+        for loss_fn_G in loss_fns:
             print(f"{family}(resolution={res}, n_classes={n_classes}) "
-                  f"{loss_fn.__class__.__name__}")
+                  f"{loss_fn_G.__name__}")
 
             for _ in range(N):
                 print(".", end="", flush=True)
-                x = torch.randn(1, 3, res, res, requires_grad=True, device=device)
-                y = torch.randint(n_classes, (1,), device=device)
+                x = torch.randn(2, 3, res, res, requires_grad=True, device=device)
+                y = torch.randint(n_classes, (2,), device=device)
                 x.retain_grad()
 
                 D1.zero_grad()
-                y1, _ = gn.normalize_D(D1, x, loss_fn, y=y)
-                loss = loss_fn(y1)
-                loss.backward()
+                _, loss = gn.normalize_D(D1, x, loss_fn_G, y=y)
+                loss.mean().backward()
                 grad1 = x.grad.detach().clone()
                 x.grad.zero_()
 
                 D2.zero_grad()
-                y2, _ = gn.normalize_G(D2, x, loss_fn, y=y)
-                loss = y2.mean()
-                loss.backward()
+                _, loss = gn.normalize_G(D2, x, loss_fn_G, y=y)
+                loss.mean().backward()
                 grad2 = x.grad.detach().clone()
                 x.grad.zero_()
 

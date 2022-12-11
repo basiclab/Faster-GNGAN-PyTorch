@@ -67,20 +67,22 @@ def fid(
 
 
 def train_D(
-    loader,                 # Iterator of DataLoader.
-    meter,                  # Meter for recording loss value.
-    D,                      # Discriminator.
-    G,                      # Generator.
-    loss_fn,                # Loss function.
-    gain,                   # Loss gain. Used for gradient accumulation.
-    bs_D: int,              # Batch size for D.
-    n_classes: int,         # Number of classes in the dataset.
-    z_dim: int,             # Dimension of latent space.
-    cr_gamma: float,        # Consistency regularization gamma.
-    gp_gamma: float,        # Gradient penalty gamma.
+    loader,                     # Iterator of DataLoader.
+    meter: misc.Meter,          # Meter for recording loss value.
+    D: torch.nn.Module,         # Discriminator.
+    G: torch.nn.Module,         # Generator.
+    loss_fn: callable,          # Loss function.
+    normalize_fn: callable,     # Normalization function for D.
+    bs_D: int,                  # Batch size for D.
+    n_classes: int,             # Number of classes in the dataset.
+    z_dim: int,                 # Dimension of latent space.
+    cr_gamma: float,            # Consistency regularization gamma.
+    gp_gamma: float,            # Gradient penalty gamma.
     **kwargs,
 ):
     device = dist.device()
+    collector = misc.NablaHatFxCollector(D)
+
     images_real, classes_real, images_aug = next(loader)
     images_real, classes_real = images_real.to(device), classes_real.to(device)
     z = torch.randn(bs_D, z_dim, device=device)
@@ -89,15 +91,8 @@ def train_D(
         images_fake = G(z, classes_fake)
     x = torch.cat([images_real, images_fake], dim=0)
     y = torch.cat([classes_real, classes_fake], dim=0)
-    scores, norm_nabla_fx = gn.normalize_D(D, x, loss_fn, y=y)
-    scores_real, scores_fake = torch.split(scores, bs_D)
-    loss_fake, loss_real = loss_fn(scores_fake, scores_real)
-    loss_D = loss_fake + loss_real
-
-    meter.append('loss/D', (loss_fake + loss_real).detach().cpu())
-    meter.append('loss/D/real', loss_real.detach().cpu())
-    meter.append('loss/D/fake', loss_fake.detach().cpu())
-    meter.append('norm/nabla_fx', norm_nabla_fx.detach().mean().cpu())
+    scores, (loss_real, loss_fake), norm_nabla_fx = normalize_fn(D, x, loss_fn, y=y)
+    loss_D = loss_real.mean() + loss_fake.mean()
 
     # Gradient Penalty
     if gp_gamma > 0:
@@ -107,51 +102,61 @@ def train_D(
 
     # Consistency Regularization.
     if cr_gamma > 0:
+        scores_real, _ = scores.chunk(2, dim=0)
         images_aug = images_aug.to(device)
-        scores_aug, _ = gn.normalize_D(D, images_aug, loss_fn, y=classes_real)
+        scores_aug, _, _ = normalize_fn(D, images_aug, loss_fn, y=classes_real)
         loss_cr = (scores_aug - scores_real).square().mean()
         loss_D += loss_cr.mul(cr_gamma)
         meter.append('loss/D/cr', loss_cr.detach().cpu())
 
-    collector = misc.GradFxCollector(x)
     # Backward.
-    loss_D.mul(gain).backward()
+    loss_D.backward()
+    # Remove hooks to avoid memory leak.
+    collector.remove()
 
+    meter.append('loss/D', (loss_real + loss_fake).mean().detach().cpu())
+    meter.append('loss/D/real', loss_real.mean().detach().cpu())
+    meter.append('loss/D/fake', loss_fake.mean().detach().cpu())
     with torch.no_grad():
-        grad_norm_lower_bound = (1 + x.flatten(start_dim=1).norm(dim=1)).square().reciprocal().mean()
-        grad_norm = collector.norm * x.shape[0] / 2
-        margin = grad_norm - grad_norm_lower_bound
-        meter.append('misc/grad_norm_lower_bound', grad_norm_lower_bound.cpu())
-        meter.append('misc/grad_norm', grad_norm.cpu())
-        meter.append('misc/margin', margin.cpu())
+        with torch.enable_grad():
+            scores = scores.detach().clone()
+            scores.requires_grad_(True)
+            loss_real, loss_fake = loss_fn(scores)
+            loss = loss_real.sum() + loss_fake.sum()
+            nabla_L = torch.autograd.grad(loss, scores)[0]
+            nabla_L_scale = nabla_L.abs().view(-1)
+        norm_nabla_hatfx = collector.norm_nabla_hatfx * bs_D / nabla_L_scale
+        norm_nabla_hatfx = norm_nabla_hatfx.mean()
+        meter.append('misc/norm_nabla_hatfx', norm_nabla_hatfx.cpu())
         meter.append('misc/slop', misc.calc_slop(x, scores), type='max')
+        if norm_nabla_fx is not None:
+            """If normalize_D return norm_nabla_fx, it is gradient normalization."""
+            norm_nabla_hatfx_lb = (1 + x.flatten(start_dim=1).norm(dim=1))
+            norm_nabla_hatfx_lb = norm_nabla_hatfx_lb.square().reciprocal().mean()
+            margin = norm_nabla_hatfx - norm_nabla_hatfx_lb
+            meter.append('misc/norm_nabla_hatfx_lb', norm_nabla_hatfx_lb.cpu())
+            meter.append('misc/norm_nabla_fx', norm_nabla_fx.mean().cpu())
+            meter.append('misc/margin', margin.cpu())
 
 
 def train_G(
-    meter,                  # Meter for recording loss value.
-    D,                      # Discriminator.
-    G,                      # Generator.
-    loss_fn,                # Loss function.
-    gain,                   # Loss gain. Used for gradient accumulation.
-    bs_G: int,              # Batch size for G.
-    n_classes: int,         # Number of classes in the dataset.
-    z_dim: int,             # Dimension of latent space.
-    gn_impl: str,           # The implementation name of gradient normalization
+    meter: misc.Meter,          # Meter for recording loss value.
+    D: torch.nn.Module,         # Discriminator.
+    G: torch.nn.Module,         # Generator.
+    loss_fn: callable,          # Loss function.
+    normalize_fn: callable,     # Normalization function for G.
+    bs_G: int,                  # Batch size for G.
+    n_classes: int,             # Number of classes in the dataset.
+    z_dim: int,                 # Dimension of latent space.
     **kwargs,
 ):
     device = dist.device()
     z = torch.randn(bs_G, z_dim, device=device)
     y = torch.randint(n_classes, (bs_G,), device=device)
-    fake = G(z, y)
-    if gn_impl == 'norm_G':
-        scores, _ = gn.normalize_G(D, fake, loss_fn, y=y)
-        loss_G = scores.mean()
-    else:
-        scores, _ = gn.normalize_D(D, fake, loss_fn, y=y)
-        loss_G = loss_fn(scores)
-    loss_G.mul(gain).backward()
+    _, loss_G, _ = normalize_fn(D, G(z, y), loss_fn, y=y)
+    loss_G.mean().backward()
 
-    meter.append('loss/G', loss_G.detach().cpu())
+    meter.append('loss/G', loss_G.mean().detach().cpu())
 
 
 def training_loop(
@@ -166,6 +171,8 @@ def training_loop(
     architecture_G: str,    # Generator class path.
     loss_D: str,            # loss function class path for D.
     loss_G: str,            # loss function class path for G.
+    normalize_D: str,       # Normalization function for D.
+    normalize_G: str,       # Normalization function for G.
     steps: int,             # Total iteration of the training.
     step_D: int,            # The number of iteration of the D per iteration of the G.
     bs_D: int,              # Total batch size for one training iteration of D.
@@ -178,7 +185,6 @@ def training_loop(
     beta1: float,           # Beta1 of the Adam optimizer.
     cr_gamma: float,        # Consistency regularization gamma.
     gp_gamma: float,        # Gradient penalty gamma.
-    gn_impl: str,           # The implementation name of gradient normalization
     rescale_alpha: float,   # Alpha parameter of the rescaling.
     ema_decay: float,       # Decay rate of the exponential moving average.
     ema_start: int,         # Start iteration of the exponential moving average.
@@ -196,7 +202,6 @@ def training_loop(
     assert bs_G % (accumulation * dist.num_gpus()) == 0, "bs_G is not divisible by (accumulation * num_gpus)"
     bs_D = bs_D // (accumulation * dist.num_gpus())
     bs_G = bs_G // (accumulation * dist.num_gpus())
-    gain = 1 / accumulation
     misc.set_seed(dist.rank() + seed)
 
     device = dist.device()
@@ -214,8 +219,8 @@ def training_loop(
     loader = infiniteloop(loader, sampler)
 
     # Construct Models.
-    D = misc.construct_class(architecture_D, resolution, n_classes).to(device)
-    G = misc.construct_class(architecture_G, resolution, n_classes, z_dim).to(device)
+    D = misc.dynamic_import(architecture_D)(resolution, n_classes).to(device)
+    G = misc.dynamic_import(architecture_G)(resolution, n_classes, z_dim).to(device)
     G_ema = copy.deepcopy(G)
 
     # Initialize Optimizer.
@@ -232,25 +237,30 @@ def training_loop(
     G_lrsched = torch.optim.lr_scheduler.LambdaLR(G_opt, lr_lambda=decay_rate)
 
     # Loss function for real and fake images.
-    loss_fn_D = misc.construct_class(loss_D)
-    loss_fn_G = misc.construct_class(loss_G)
+    loss_fn_D = misc.dynamic_import(loss_D)
+    loss_fn_G = misc.dynamic_import(loss_G)
+
+    # The abstraction of normalization function. It is compatible with vanilla GAN
+    normalize_fn_D = misc.dynamic_import(normalize_D)
+    normalize_fn_G = misc.dynamic_import(normalize_G)
 
     # tf board writer.
     if dist.is_main():
         writer = SummaryWriter(logdir)
-        # collect the norm of forward of each layer and the norm of gradient
-        # w.r.t each parameter.
+        # Collect following information for each layer:
+        # - the norm of forward propagation
+        # - the norm of gradient w.r.t parameter
         if isinstance(D, DistributedDataParallel):
-            collector = misc.Collector(D.module)
+            collector = misc.ForwAndParamGradCollector(D.module)
         else:
-            collector = misc.Collector(D)
+            collector = misc.ForwAndParamGradCollector(D)
 
     if not resume:
         # Sample fixed random noises and classes.
         fixed_z = torch.randn(sample_size, z_dim, device=device)
-        fixed_z = torch.split(fixed_z, sample_size // dist.num_gpus(), dim=0)
+        fixed_z = fixed_z.chunk(dist.num_gpus(), dim=0)
         fixed_y = torch.randint(n_classes, (sample_size,), device=device)
-        fixed_y = torch.split(fixed_y, sample_size // dist.num_gpus(), dim=0)
+        fixed_y = fixed_y.chunk(dist.num_gpus(), dim=0)
         # Initialize iteration and best results.
         start_step = 0
         best = {
@@ -258,7 +268,7 @@ def training_loop(
             'FID/ema/best': float('inf'),
         }
         if dist.is_main():
-            # Save arguments fo config.json
+            # Save arguments to `config.json`.
             with open(os.path.join(logdir, "config.json"), 'w') as f:
                 json.dump(kwargs, f, indent=2, sort_keys=True)
             samples = [(dataset[i][0] + 1) / 2 for i in range(sample_size)]
@@ -274,9 +284,9 @@ def training_loop(
         D_lrsched.load_state_dict(ckpt['D_lrsched'])
         G_lrsched.load_state_dict(ckpt['G_lrsched'])
         fixed_z = ckpt['fixed_z'].to(device)
-        fixed_z = torch.split(fixed_z, sample_size // dist.num_gpus(), dim=0)
+        fixed_z = fixed_z.chunk(dist.num_gpus(), dim=0)
         fixed_y = ckpt['fixed_y'].to(device)
-        fixed_y = torch.split(fixed_y, sample_size // dist.num_gpus(), dim=0)
+        fixed_y = fixed_y.chunk(dist.num_gpus(), dim=0)
         start_step = ckpt['step']
         best = ckpt['best']
         del ckpt
@@ -317,13 +327,16 @@ def training_loop(
                     D.rescale(alpha=rescale_alpha)
             for i in range(accumulation):
                 with dist.ddp_sync(D, sync=(i == accumulation - 1)):
-                    train_D(loader, meter, D, G, loss_fn_D, gain, **kwargs)
+                    train_D(loader, meter, D, G, loss_fn_D, normalize_fn_D, **kwargs)
+            if accumulation != 1:
+                for param in D.parameters():
+                    param.grad.div_(accumulation)
             D_opt.step()
             D_opt.zero_grad(set_to_none=True)
         D_lrsched.step()
         D.requires_grad_(False)
 
-        # Record the last forward and backward pass of D.
+        # Record the last forward pass of D.
         if dist.is_main():
             for tag, value in collector.norms():
                 writer.add_scalar(tag, value, step)
@@ -332,7 +345,10 @@ def training_loop(
         G.requires_grad_(True)
         for i in range(accumulation):
             with dist.ddp_sync(G, sync=(i == accumulation - 1)):
-                train_G(meter, D, G, loss_fn_G, gain, **kwargs)
+                train_G(meter, D, G, loss_fn_G, normalize_fn_G, **kwargs)
+        if accumulation != 1:
+            for param in G.parameters():
+                param.grad.div_(accumulation)
         G_opt.step()
         G_opt.zero_grad(set_to_none=True)
         G_lrsched.step()
