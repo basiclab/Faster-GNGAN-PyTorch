@@ -55,16 +55,16 @@ class ForwAndParamGradCollector(object):
 
         for name, m in module.named_modules():
             if len(m._parameters) > 0:
-                forward_key = f"norm/forward/{name}"
+                forward_key = f"forward/norm/{name}"
                 self.hooks[forward_key] = self.ForwardHook()
                 m.register_forward_hook(self.hooks[forward_key])
 
         for name, p in module.named_parameters():
-            key = f"norm/grad/{name}"
+            key = f"grad/norm/{name}"
             self.hooks[key] = self.GradientHook()
             p.register_hook(self.hooks[key])
 
-            key = f"norm/param/{name}"
+            key = f"param/norm/{name}"
             self.hooks[key] = self.WeightHook(p, key)
             p.register_hook(self.hooks[key])
 

@@ -1,0 +1,22 @@
+{
+    "logdir": "./logs/GN_stl10_cnn6_0",
+    "data_path": "./data/stl10",
+    "hflip": true,
+    "resolution": 48,
+    "n_classes": 1,
+    "z_dim": 128,
+    "architecture_D": "training.models.cnn.Discriminator6",
+    "architecture_G": "training.models.dcgan.Generator",
+    "loss_D": "training.losses.ns_loss_D",
+    "loss_G": "training.losses.ns_loss_G",
+    "steps": 200000,
+    "step_D": 1,
+    "bs_D": 64,
+    "bs_G": 128,
+    "lr_D": 0.0002,
+    "lr_G": 0.0002,
+    "lr_decay": false,
+    "ema_decay": 0.9999,
+    "ema_start": 0,
+    "fid_stats": "./stats/stl10.unlabeled.48.npz"
+}
