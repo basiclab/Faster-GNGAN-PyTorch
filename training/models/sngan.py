@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 
+from tqdm import trange
+
 
 def normalize(x):
     norm = torch.norm(torch.flatten(x))
@@ -122,48 +124,47 @@ class Discriminator9(DiscriminatorK):
         super().__init__(resolution, n_classes, num_per_block=3)
 
 
+def auto_spectral_norm(module, in_dim, iteration=100, device=torch.device('cuda:0')):
+    v = normalize(torch.randn(size=in_dim)).to(device)
+    with torch.no_grad():
+        output_shape = module(v).shape
+    v_dummy = torch.randn(size=in_dim, requires_grad=True).to(device)
+
+    # get bias
+    if isinstance(module, SpectralNorm):
+        bias = getattr(module.module, 'bias')
+    else:
+        bias = getattr(module, 'bias')
+    while len(bias.shape) < len(output_shape) - 1:
+        bias = bias.unsqueeze(-1)
+
+    # power iteration
+    for _ in trange(iteration, leave=False, ncols=0, desc="power iteration"):
+        with torch.no_grad():
+            if bias is not None:
+                u = normalize(module(v) - bias)
+            else:
+                u = normalize(module(v))
+        v = torch.autograd.grad(module(v_dummy), v_dummy, u)[0]
+        with torch.no_grad():
+            v = normalize(v)
+
+    # calculate spectral norm
+    with torch.no_grad():
+        if bias is not None:
+            return torch.dot(u.reshape(-1), (module(v) - bias).reshape(-1))
+        else:
+            return torch.dot(u.reshape(-1), module(v).reshape(-1))
+
+
 if __name__ == '__main__':
     """
     The following program is used to test the class `SpectralNorm`.
     """
     import copy
-    import torch.nn as nn
     from torch.nn.utils import spectral_norm
-    from tqdm import trange
 
     device = torch.device('cuda:0')
-
-    def auto_spectral_norm(module, in_dim, iteration=100):
-        v = normalize(torch.randn(size=in_dim)).to(device)
-        with torch.no_grad():
-            output_shape = module(v).shape
-        v_dummy = torch.randn(size=in_dim, requires_grad=True).to(device)
-
-        # get bias
-        if isinstance(module, SpectralNorm):
-            bias = getattr(module.module, 'bias')
-        else:
-            bias = getattr(module, 'bias')
-        while len(bias.shape) < len(output_shape) - 1:
-            bias = bias.unsqueeze(-1)
-
-        # power iteration
-        for _ in trange(iteration, leave=False, ncols=0, desc="power iteration"):
-            with torch.no_grad():
-                if bias is not None:
-                    u = normalize(module(v) - bias)
-                else:
-                    u = normalize(module(v))
-            v = torch.autograd.grad(module(v_dummy), v_dummy, u)[0]
-            with torch.no_grad():
-                v = normalize(v)
-
-        # calculate spectral norm
-        with torch.no_grad():
-            if bias is not None:
-                return torch.dot(u.reshape(-1), (module(v) - bias).reshape(-1))
-            else:
-                return torch.dot(u.reshape(-1), module(v).reshape(-1))
 
     in_dim = (1, 8, 32, 32)
     conv = nn.Conv2d(8, 16, kernel_size=3, padding=1, bias=True).to(device)
