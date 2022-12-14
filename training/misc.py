@@ -60,7 +60,7 @@ class ForwAndParamGradCollector(object):
                 m.register_forward_hook(self.hooks[forward_key])
 
         for name, p in module.named_parameters():
-            key = f"grad/norm/{name}"
+            key = f"param/grad/norm/{name}"
             self.hooks[key] = self.GradientHook()
             p.register_hook(self.hooks[key])
 
