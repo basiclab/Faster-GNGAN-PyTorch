@@ -35,6 +35,7 @@ class DiscriminatorK(RescalableSequentialModel):
             if isinstance(m, RescalableWrapper):
                 torch.nn.init.normal_(m.module.weight, std=0.02)
                 torch.nn.init.zeros_(m.module.bias)
+                m.init_module()
 
     def forward(self, x, *args, **kwargs):
         y = self.main(x)
