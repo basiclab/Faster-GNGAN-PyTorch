@@ -1,8 +1,11 @@
 def test_model_rescaling():
     import torch
-    from training.models import resnet, dcgan, biggan
+    from training.models import resnet, dcgan, biggan, cnn
 
     Models = [
+        (32, 1, cnn.Discriminator3, 'CNN3'),
+        (32, 1, cnn.Discriminator5, 'CNN6'),
+        (32, 1, cnn.Discriminator7, 'CNN9'),
         (32, 10, biggan.Discriminator, 'BigGAN'),
         (128, 1000, biggan.Discriminator, 'BigGAN'),
         (32, 1, resnet.Discriminator, 'ResNet'),
@@ -73,9 +76,12 @@ def test_loss():
 
     from training import gn
     from training import losses
-    from training.models import resnet, dcgan, biggan
+    from training.models import resnet, dcgan, biggan, cnn
 
     Models = [
+        (32, 1, cnn.Discriminator3, 'CNN3'),
+        (32, 1, cnn.Discriminator5, 'CNN6'),
+        (32, 1, cnn.Discriminator7, 'CNN9'),
         (32, 10, biggan.Discriminator, 'BigGAN'),
         (128, 1000, biggan.Discriminator, 'BigGAN'),
         (32, 1, resnet.Discriminator, 'ResNet'),
@@ -118,13 +124,13 @@ def test_loss():
                 x.retain_grad()
 
                 D1.zero_grad()
-                _, loss = gn.normalize_D(D1, x, loss_fn_G, y=y)
+                _, loss, _ = gn.normalize_D(D1, x, loss_fn_G, y=y)
                 loss.mean().backward()
                 grad1 = x.grad.detach().clone()
                 x.grad.zero_()
 
                 D2.zero_grad()
-                _, loss = gn.normalize_G(D2, x, loss_fn_G, y=y)
+                _, loss, _ = gn.normalize_G(D2, x, loss_fn_G, y=y)
                 loss.mean().backward()
                 grad2 = x.grad.detach().clone()
                 x.grad.zero_()

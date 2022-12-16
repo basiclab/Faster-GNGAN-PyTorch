@@ -5,7 +5,7 @@
     "resolution": 32,
     "n_classes": 1,
     "z_dim": 128,
-    "architecture_D": "training.models.sngan.Discriminator9",
+    "architecture_D": "training.models.sngan.Discriminator7",
     "architecture_G": "training.models.dcgan.Generator",
     "loss_D": "training.losses.wgan_loss_D",
     "loss_G": "training.losses.wgan_loss_G",
