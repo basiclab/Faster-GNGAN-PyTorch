@@ -1,12 +1,12 @@
 {
-    "logdir": "./logs/GN_stl10_cnn9_0",
-    "data_path": "./data/stl10",
+    "logdir": "./logs/Ablation/GN_cifar10_cnn9_0",
+    "data_path": "./data/cifar10",
     "hflip": true,
-    "resolution": 48,
+    "resolution": 32,
     "n_classes": 1,
     "z_dim": 128,
-    "architecture_D": "training.models.cnn.Discriminator7",
-    "architecture_G": "training.models.cnn.Generator6",
+    "architecture_D": "training.models.cnn.Discriminator9",
+    "architecture_G": "training.models.dcgan.Generator",
     "loss_D": "training.losses.wgan_loss_D",
     "loss_G": "training.losses.wgan_loss_G",
     "steps": 200000,
@@ -18,5 +18,5 @@
     "lr_decay": false,
     "ema_decay": 0.9999,
     "ema_start": 0,
-    "fid_stats": "./stats/stl10.unlabeled.48.npz"
+    "fid_stats": "./stats/cifar10.train.npz"
 }
