@@ -73,7 +73,7 @@ class SpectralNorm(nn.Module):
 
 
 class DiscriminatorK(nn.Module):
-    def __init__(self, resolution, n_classes, num_layers=3):
+    def __init__(self, resolution, n_classes, num_per_block=1):
         super().__init__()
         config = {
             32: 4,
@@ -82,12 +82,10 @@ class DiscriminatorK(nn.Module):
         assert resolution in config, "The resolution %d is not supported in Generator." % resolution
         M = config[resolution]
 
-        num_blocks = [num_layers // 3 + (stage < num_layers % 3) for stage in range(3)]
-        num_channels = [64, 128, 256]
-        now_ch = 3
         blocks = []
-        for ch, num_block in zip(num_channels, num_blocks):
-            for _ in range(num_block - 1):
+        now_ch = 3
+        for ch in [64, 128, 256]:
+            for _ in range(num_per_block - 1):
                 blocks.append(SpectralNorm(nn.Conv2d(
                     now_ch, ch, kernel_size=3, stride=1, padding=1)))
                 blocks.append(nn.LeakyReLU(0.1, inplace=True))
@@ -113,17 +111,17 @@ class DiscriminatorK(nn.Module):
 
 class Discriminator3(DiscriminatorK):
     def __init__(self, resolution, n_classes):
-        super().__init__(resolution, n_classes, num_layers=3)
+        super().__init__(resolution, n_classes, num_per_block=1)
 
 
-class Discriminator5(DiscriminatorK):
+class Discriminator6(DiscriminatorK):
     def __init__(self, resolution, n_classes):
-        super().__init__(resolution, n_classes, num_layers=5)
+        super().__init__(resolution, n_classes, num_per_block=2)
 
 
-class Discriminator7(DiscriminatorK):
+class Discriminator9(DiscriminatorK):
     def __init__(self, resolution, n_classes):
-        super().__init__(resolution, n_classes, num_layers=7)
+        super().__init__(resolution, n_classes, num_per_block=3)
 
 
 def auto_spectral_norm(module, in_dim, iteration=100, device=torch.device('cuda:0')):
