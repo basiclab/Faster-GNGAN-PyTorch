@@ -6,7 +6,7 @@
     "n_classes": 1,
     "z_dim": 128,
     "architecture_D": "training.models.cnn.Discriminator5",
-    "architecture_G": "training.models.dcgan.Generator",
+    "architecture_G": "training.models.cnn.Generator4",
     "loss_D": "training.losses.wgan_loss_D",
     "loss_G": "training.losses.wgan_loss_G",
     "steps": 200000,
