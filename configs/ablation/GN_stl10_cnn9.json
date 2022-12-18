@@ -10,7 +10,7 @@
     "loss_D": "training.losses.wgan_loss_D",
     "loss_G": "training.losses.wgan_loss_G",
     "steps": 200000,
-    "step_D": 1,
+    "step_D": 3,
     "bs_D": 64,
     "bs_G": 128,
     "lr_D": 0.0002,

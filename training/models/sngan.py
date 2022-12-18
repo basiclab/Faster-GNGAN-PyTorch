@@ -95,7 +95,7 @@ class DiscriminatorK(nn.Module):
             blocks.append(nn.LeakyReLU(0.1, inplace=True))
             now_ch = ch * 2
         blocks.append(nn.Flatten(start_dim=1))
-        blocks.append(SpectralNorm(nn.Linear(M * M * 512, 1)))
+        blocks.append(SpectralNorm(nn.Linear(M * M * now_ch, 1)))
         self.main = nn.Sequential(*blocks)
 
         for m in self.modules():

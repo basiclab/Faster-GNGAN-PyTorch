@@ -12,7 +12,7 @@
     "normalize_D": "training.gn.vanilla_D",
     "normalize_G": "training.gn.vanilla_G",
     "steps": 200000,
-    "step_D": 1,
+    "step_D": 3,
     "bs_D": 64,
     "bs_G": 128,
     "lr_D": 0.0002,
