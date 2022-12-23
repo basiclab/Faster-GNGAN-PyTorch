@@ -80,7 +80,8 @@ def testing(
                         counter += 1
             else:
                 imgs.append(batch_imgs.cpu())
-            progress.update(bs_G * dist.num_gpus())
+            progress.update(len(batch_imgs))
+        dist.barrier()
         del batch_imgs
     progress.close()
     del G
