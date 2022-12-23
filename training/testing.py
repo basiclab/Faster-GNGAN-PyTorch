@@ -31,12 +31,7 @@ def testing(
     misc.set_seed(dist.rank() + seed)
 
     device = dist.device()
-    G = misc.construct_class(architecture_G, resolution, n_classes, z_dim).to(device)
-
-    # Initialize models for multi-gpu inferencing.
-    if dist.is_initialized():
-        G = SyncBatchNorm.convert_sync_batchnorm(G)
-        G = DistributedDataParallel(G, device_ids=[device])
+    G = misc.dynamic_import(architecture_G)(resolution, n_classes, z_dim).to(device)
 
     # Load the model.
     if ema:
@@ -46,6 +41,12 @@ def testing(
         G_state_dict = torch.load(
             os.path.join(logdir, 'best.pt'), map_location='cpu')['G']
     G.load_state_dict(G_state_dict)
+
+    # Initialize models for multi-gpu inferencing.
+    if dist.is_initialized():
+        G = SyncBatchNorm.convert_sync_batchnorm(G)
+        G = DistributedDataParallel(G, device_ids=[device])
+    G.requires_grad_(False)
 
     # if `--output` is used, the generated images are saved to the output
     # directory on the fly instead of storing them in RAM. Which is useful when
@@ -80,6 +81,7 @@ def testing(
             else:
                 imgs.append(batch_imgs.cpu())
             progress.update(bs_G * dist.num_gpus())
+        del batch_imgs
     progress.close()
     del G
 
