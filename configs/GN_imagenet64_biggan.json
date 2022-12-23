@@ -1,8 +1,8 @@
 {
-    "logdir": "./logs/GN_imagenet128_biggan_0",
+    "logdir": "./logs/GN_imagenet64_biggan_0",
     "data_path": "./data/imagenet",
     "hflip": true,
-    "resolution": 128,
+    "resolution": 64,
     "n_classes": 1000,
     "z_dim": 120,
     "architecture_D": "training.models.biggan.Discriminator",
@@ -11,15 +11,15 @@
     "loss_G": "training.losses.hinge_loss_G",
     "steps": 100000,
     "step_D": 4,
-    "bs_D": 128,
-    "bs_G": 128,
+    "bs_D": 64,
+    "bs_G": 64,
     "lr_D": 0.0002,
     "lr_G": 0.0001,
     "lr_decay": false,
     "ema_decay": 0.9999,
-    "ema_start": 0,
+    "ema_start": 20000,
     "eval_step": 1000,
     "beta0": 0.0,
     "beta1": 0.999,
-    "fid_stats": "./stats/imagenet.train.128.npz"
+    "fid_stats": "./stats/imagenet.train.64.npz"
 }
