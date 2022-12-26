@@ -9,17 +9,11 @@ __pycache__
 
 # log
 logs
-cvpr21
-iccv21
-*.zip
 
 # data
 data
 stats
-*.png
 _cache_*
-figures
-*.mp4
 
 # pdf
 *.pdf
@@ -27,7 +21,6 @@ figures
 # model
 *.pt
 
-# test scripts
-*.sh
-tools
-!indocker.sh
+# visulaization data
+vis/nabla_fx/*.json
+vis/figures

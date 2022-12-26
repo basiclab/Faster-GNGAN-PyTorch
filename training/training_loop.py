@@ -76,8 +76,9 @@ def train_D(
     bs_D: int,                  # Batch size for D.
     n_classes: int,             # Number of classes in the dataset.
     z_dim: int,                 # Dimension of latent space.
-    cr_gamma: float,            # Consistency regularization gamma.
-    gp_gamma: float,            # Gradient penalty gamma.
+    cr_lambda: float,           # Consistency regularization gamma.
+    gp0_lambda: float,            # 0 Gradient penalty gamma.
+    gp1_lambda: float,           # 1 Gradient penalty gamma.
     **kwargs,
 ):
     device = dist.device()
@@ -94,19 +95,32 @@ def train_D(
     scores, (loss_real, loss_fake), norm_nabla_fx = normalize_fn(D, x, loss_fn, y=y)
     loss_D = loss_real.mean() + loss_fake.mean()
 
-    # Gradient Penalty
-    if gp_gamma > 0:
+    # 1 Gradient Penalty
+    if gp1_lambda > 0:
+        t = torch.rand(bs_D, 1, 1, 1, device=device)
+        inter_x = t * images_real + (1 - t) * images_fake
+        inter_x.requires_grad_(True)
+        inter_y, _, _ = normalize_fn(D, inter_x, loss_fn, y=classes_real)
+        gp1 = torch.autograd.grad(
+            outputs=inter_y.sum(), inputs=inter_x, create_graph=True)[0]
+        gp1_norm = gp1.flatten(start_dim=1).norm(dim=1)
+        loss_gp = (gp1_norm - 1).square().mean()
+        loss_D += loss_gp.mul(gp1_lambda)
+        meter.append('loss/D/gp', loss_gp.detach().cpu())
+
+    # 0 Gradient Penalty
+    if gp0_lambda > 0:
         loss_gp = norm_nabla_fx.square().mean()
-        loss_D += loss_gp.mul(gp_gamma)
+        loss_D += loss_gp.mul(gp0_lambda)
         meter.append('loss/D/gp', loss_gp.detach().cpu())
 
     # Consistency Regularization.
-    if cr_gamma > 0:
+    if cr_lambda > 0:
         scores_real, _ = scores.chunk(2, dim=0)
         images_aug = images_aug.to(device)
         scores_aug, _, _ = normalize_fn(D, images_aug, loss_fn, y=classes_real)
         loss_cr = (scores_aug - scores_real).square().mean()
-        loss_D += loss_cr.mul(cr_gamma)
+        loss_D += loss_cr.mul(cr_lambda)
         meter.append('loss/D/cr', loss_cr.detach().cpu())
 
     # Backward.
@@ -118,17 +132,25 @@ def train_D(
     meter.append('loss/D/real', loss_real.mean().detach().cpu())
     meter.append('loss/D/fake', loss_fake.mean().detach().cpu())
     with torch.no_grad():
-        with torch.enable_grad():
-            scores = scores.detach().clone()
-            scores.requires_grad_(True)
-            loss_real, loss_fake = loss_fn(scores)
-            loss = loss_real.sum() + loss_fake.sum()
-            nabla_L = torch.autograd.grad(loss, scores)[0]
-            nabla_L_scale = nabla_L.abs().view(-1)
-        norm_nabla_hatfx = collector.norm_nabla_hatfx * bs_D / nabla_L_scale
-        norm_nabla_hatfx = norm_nabla_hatfx.mean()
-        meter.append('misc/norm_nabla_hatfx', norm_nabla_hatfx.cpu())
+        # Record the empirical slop.
         meter.append('misc/slop', misc.calc_slop(x, scores), type='max')
+
+        # Record the gradient norm w.r.t Generator
+        if gp1_lambda > 0:
+            norm_nabla_hatfx = gp1_norm
+        else:
+            with torch.enable_grad():
+                scores = scores.detach().clone()
+                scores.requires_grad_(True)
+                loss_real, loss_fake = loss_fn(scores)
+                loss = loss_real.sum() + loss_fake.sum()
+                nabla_L = torch.autograd.grad(loss, scores)[0]
+                nabla_L_scale = nabla_L.abs().view(-1)
+                norm_nabla_hatfx = (
+                    collector.norm_nabla_hatfx * bs_D / nabla_L_scale)
+        meter.append('misc/norm_nabla_hatfx', norm_nabla_hatfx.mean().cpu())
+
+        # Record upper/lower bound of gradient norm for GN-GAN only.
         if norm_nabla_fx is not None:
             """If normalize_D return norm_nabla_fx, it is gradient normalization."""
             norm_nabla_hatfx_lb = (1 + x.flatten(start_dim=1).norm(dim=1))
@@ -183,8 +205,9 @@ def training_loop(
     accumulation: int,      # Number of gradient accumulation.
     beta0: float,           # Beta0 of the Adam optimizer.
     beta1: float,           # Beta1 of the Adam optimizer.
-    cr_gamma: float,        # Consistency regularization gamma.
-    gp_gamma: float,        # Gradient penalty gamma.
+    cr_lambda: float,       # Consistency regularization gamma.
+    gp0_lambda: float,      # 0 Gradient penalty gamma.
+    gp1_lambda: float,      # 1 Gradient penalty gamma.
     rescale_alpha: float,   # Alpha parameter of the rescaling.
     ema_decay: float,       # Decay rate of the exponential moving average.
     ema_start: int,         # Start iteration of the exponential moving average.
@@ -205,7 +228,7 @@ def training_loop(
     misc.set_seed(dist.rank() + seed)
 
     device = dist.device()
-    dataset = datasets.Dataset(data_path, hflip, resolution, cr_gamma > 0)
+    dataset = datasets.Dataset(data_path, hflip, resolution, cr_lambda > 0)
     if dist.is_initialized():
         sampler = DistributedSampler(dataset, seed=seed, drop_last=True)
     else:

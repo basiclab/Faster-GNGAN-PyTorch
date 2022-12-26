@@ -111,10 +111,14 @@ class NablaHatFxCollector(object):
         self.handle_forward = module.register_forward_pre_hook(self.forward_hook)
         self.handle_backward = module.register_full_backward_hook(self.backward_hook)
         self.norm_nabla_hatfx = None
+        self.forward_flag = False
 
     @torch.no_grad()
     def forward_hook(self, module, input):
-        input[0].requires_grad_(True)
+        # Record the first forward pass only.
+        if not self.forward_flag:
+            input[0].requires_grad_(True)
+            self.forward_flag = True
 
     @torch.no_grad()
     def backward_hook(self, module, input_grad, output_grad):

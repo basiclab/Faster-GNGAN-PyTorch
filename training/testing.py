@@ -31,12 +31,13 @@ def testing(
     misc.set_seed(dist.rank() + seed)
 
     device = dist.device()
-    G = misc.construct_class(architecture_G, resolution, n_classes, z_dim).to(device)
+    G = misc.dynamic_import(architecture_G)(resolution, n_classes, z_dim).to(device)
 
     # Initialize models for multi-gpu inferencing.
     if dist.is_initialized():
         G = SyncBatchNorm.convert_sync_batchnorm(G)
         G = DistributedDataParallel(G, device_ids=[device])
+    G.requires_grad_(False)
 
     # Load the model.
     if ema:
