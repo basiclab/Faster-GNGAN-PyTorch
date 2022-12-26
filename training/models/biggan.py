@@ -36,13 +36,14 @@ class Attention(nn.Module):
         k = F.max_pool2d(self.k(x), [2, 2])
         v = F.max_pool2d(self.v(x), [2, 2])
         # flatten
-        q = q.view(B, C // 8, H * W)            # query
-        k = k.view(B, C // 8, H * W // 4)       # key
-        v = v.view(B, C // 2, H * W // 4)       # value
+        q = q.view(B, C // 8, H * W).contiguous()           # query
+        k = k.view(B, C // 8, H * W // 4).contiguous()      # key
+        v = v.view(B, C // 2, H * W // 4).contiguous()      # value
         # attention weights
-        w = F.softmax(torch.bmm(q.transpose(1, 2), k), -1)
+        w = F.softmax(torch.bmm(q.transpose(1, 2), k), -1)  # attn
         # attend and project
-        o = self.o(torch.bmm(v, w.transpose(1, 2)).view(B, C // 2, H, W))
+        o = torch.bmm(v, w.transpose(1, 2)).view(B, C // 2, H, W).contiguous()
+        o = self.o(o)
         return self.gamma * o + x
 
 
@@ -96,17 +97,19 @@ class Generator(nn.Module):
         config = {
             # channels, attn_indices, use_shared_embedding
             32: ([256, 256, 256, 256], [], False),
-            128: ([1536, 1536, 768, 384, 192, 96], [4], True),
+            64: ([1024, 512, 256, 128, 64], [4], True),         # ch = 64
+            128: ([1024, 1024, 512, 256, 128, 64], [4], True),  # ch = 64
         }
         assert resolution in config, "The resolution %d is not supported in Generator." % resolution
         channels, attn_indices, use_shared_embedding = config[resolution]
 
-        self.use_shared_embedding = use_shared_embedding    # shared embedding for condition batchnorm (cbn)
+        # shared embedding for condition batchnorm (cbn)
+        self.use_shared_embedding = use_shared_embedding
         if use_shared_embedding:
             self.z_chunk_num = len(channels)
             self.z_chunk_size = z_dim // self.z_chunk_num
             self.cbn_in_dim = self.z_chunk_size + shared_dim
-            self.use_shared_embedding = nn.Embedding(n_classes, shared_dim)
+            self.shared_embedding = nn.Embedding(n_classes, shared_dim)
             blocks = [sn(nn.Linear(self.z_chunk_size, channels[0] * 4 * 4))]
         else:
             # CIFAR10
@@ -134,7 +137,10 @@ class Generator(nn.Module):
 
         for m in self.modules():
             if isinstance(m, (nn.Conv2d, nn.Linear, nn.Embedding)):
-                torch.nn.init.xavier_uniform_(m.weight)
+                if resolution == 32:
+                    torch.nn.init.xavier_uniform_(m.weight)
+                else:
+                    torch.nn.init.orthogonal_(m.weight)
                 if hasattr(m, 'bias') and m.bias is not None:
                     torch.nn.init.zeros_(m.bias)
 
@@ -223,7 +229,8 @@ class Discriminator(RescalableDiscriminator):
         config = {
             # channels, attn_indices, down_layers
             32: ([256, 256, 256, 256], [], 2),
-            128: ([96, 192, 384, 768, 1536, 1536], [0], 5),
+            64: ([64, 128, 256, 512, 1024], [0], 4),
+            128: ([64, 128, 256, 512, 1024, 1024], [0], 5),
         }
         assert resolution in config, "The resolution %d is not supported in Discriminator." % resolution
         channels, attn_indices, down_layers = config[resolution]
@@ -244,7 +251,10 @@ class Discriminator(RescalableDiscriminator):
 
         for m in self.modules():
             if isinstance(m, RescalableWrapper):
-                torch.nn.init.xavier_uniform_(m.module.weight)
+                if resolution == 32:
+                    torch.nn.init.xavier_uniform_(m.module.weight)
+                else:
+                    torch.nn.init.orthogonal_(m.module.weight)
                 if hasattr(m.module, 'bias') and m.module.bias is not None:
                     torch.nn.init.zeros_(m.module.bias)
                 m.init_module()
