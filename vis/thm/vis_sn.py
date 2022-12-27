@@ -8,9 +8,6 @@ import numpy as np
 from tqdm import tqdm
 
 from training.models import sngan, cnn, dcgan
-from training.datasets import Dataset
-from training.losses import wgan_loss_G
-from training.gn import normalize_D
 
 
 device = torch.device('cuda:0')

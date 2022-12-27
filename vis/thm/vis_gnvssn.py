@@ -10,6 +10,7 @@ from training.models import sngan, cnn, dcgan
 from training.datasets import Dataset
 from training.losses import wgan_loss_G
 from training.gn import normalize_D
+from vis.thm.ema import ema
 
 
 device = torch.device('cuda:0')
@@ -25,16 +26,6 @@ runs = {
     "SN-3L": ("SN_cifar10_cnn3", sngan.Discriminator3, dcgan.Generator),
     "GN-3L": ("GN_cifar10_cnn3", cnn.Discriminator3, dcgan.Generator),
 }
-
-
-def ema(data, r=0.7):
-    ret = []
-    for x in data:
-        if len(ret) == 0:
-            ret.append(x)
-        else:
-            ret.append(ret[-1] * (1 - r) + x * r)
-    return np.array(ret)
 
 
 def main():
@@ -119,6 +110,8 @@ def main():
             plot_gn_data[legend] = (steps, gn_values)
             torch.save(plot_gn_data[legend], cache_path)
 
+    # ============================= plot =============================
+
     ticks_fontsize = 25
     legend_fontsize = 30
     label_fontsize = 35
@@ -167,7 +160,7 @@ def main():
     ax2.set_ylim(-0.003, 0.11)  # most of the data
     ax2.set_yticks([0, 0.05, 0.1])
     ax2.tick_params(axis='y', labelsize=ticks_fontsize)
-    ax2.set_ylabel(r'$\Vert\nabla_x D(x)\Vert$', fontsize=label_fontsize, y=1)
+    ax2.set_ylabel(r'$\max\Vert\nabla_x D(x)\Vert$', fontsize=label_fontsize, y=1)
 
     # lower upper
     ax1.set_yticks([0.8, 0.9, 1.0])

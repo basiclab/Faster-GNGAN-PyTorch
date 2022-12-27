@@ -121,7 +121,6 @@ def main():
     xticks_label = ['%dk' % (x / 1000) for x in xticks]
     plt.xticks(xticks, xticks_label, fontsize=ticks_fontsize)
     plt.xlabel('Iteration', fontsize=label_fontsize)
-    # ax.tick_params(axis='x', labelsize=label_fontsize)
 
     yticks = [0, 30, 60, 90]
     plt.yticks(yticks, fontsize=ticks_fontsize)
