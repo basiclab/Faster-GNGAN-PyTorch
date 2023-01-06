@@ -8,6 +8,7 @@ import numpy as np
 from tqdm import tqdm
 
 from training.models import sngan, cnn, dcgan
+from vis.core import style
 
 
 device = torch.device('cuda:0')
@@ -75,10 +76,8 @@ def main():
                 if legend.startswith("SN"):
                     if not isinstance(module, sngan.SpectralNorm):
                         continue
-                    if not isinstance(module.module, nn.Conv2d):
-                        continue
                 else:
-                    if not isinstance(module, nn.Conv2d):
+                    if not isinstance(module, (nn.Conv2d, nn.Linear)):
                         continue
                 hook = ShapeHook.register(module)
                 hooks.append(hook)
@@ -93,45 +92,38 @@ def main():
                 vis_sn_data[legend].append(sn.cpu().item())
             torch.save(vis_sn_data[legend], cache_path)
 
+    # ============================= plot =============================
+
     # Plot spectral norm
-    ticks_fontsize = 25
-    legend_fontsize = 30
-    label_fontsize = 35
-    bar_width = 0.4
+    bar_width = 0.35
 
     plt.figure(figsize=(8, 7))
     for i, (legend, sn) in enumerate(vis_sn_data.items()):
         print(legend, ", ".join(f"{v:.3f}" for v in sn))
-        if legend.startswith('SN'):
-            enhence = 1
-        else:
-            enhence = 1
         r = np.arange(len(sn)) + i * bar_width
-        bar = plt.bar(r, np.array(sn) * enhence, width=bar_width,
-                      edgecolor='white', label=legend, alpha=0.8)
+        bar = plt.bar(
+            r, np.array(sn), width=bar_width, edgecolor='white', alpha=0.8,
+            label=legend)
         for rect in bar:
             height = rect.get_height()
             if height > 30:
-                plt.text(rect.get_x() + rect.get_width() / 2.0, 30,
-                         f'{height:.0f}', ha='center', va='bottom',
-                         fontsize=ticks_fontsize)
+                plt.text(
+                    rect.get_x() + rect.get_width() / 2.0, 30, f'{height:.0f}',
+                    ha='center', va='bottom', fontsize=25)
 
     tick_center = np.arange(len(sn)) + (len(vis_sn_data) - 1) * 0.5 * bar_width
     xtick_labels = np.arange(len(sn)) + 1
-    plt.xticks(tick_center, xtick_labels, fontsize=ticks_fontsize)
-    plt.xlabel('$k$-th CNN Layer', fontsize=label_fontsize)
+    plt.xticks(tick_center, xtick_labels)
+    plt.xlabel('$k$')
 
     yticks = [1, 10, 20, 30]
-    plt.yticks(yticks, yticks, fontsize=ticks_fontsize)
-    plt.ylabel(r'$L_{\mathbf{W}_k}$', fontsize=label_fontsize)
+    plt.yticks(yticks, yticks)
     plt.ylim(0, 30)
+    plt.ylabel(r'$L_{\mathbf{W}_k}$')
     plt.axhline(y=1, color='black', linestyle='dotted', alpha=0.5)
+    plt.grid(axis='x')
 
-    plt.legend(
-        loc='lower center', fontsize=legend_fontsize,
-        ncol=3, columnspacing=0.7, handlelength=1.0, handletextpad=0.3,
-        bbox_to_anchor=(0.5, 1.05)
-    )
+    plt.legend(loc='lower center', bbox_to_anchor=(0.5, 1.05), ncol=3)
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, 'vis_sn.png'))
     print("Saved to", os.path.join(save_dir, 'vis_sn.png'))
@@ -140,12 +132,5 @@ def main():
 if __name__ == '__main__':
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = "1"
 
-    # sudo apt install texlive-latex-extra cm-super dvipng
-    plt.rcParams.update({
-        "text.usetex": True,
-        "font.family": "Helvetica",
-        'mathtext.fontset': 'stix',
-        'font.family': 'STIXGeneral',
-    })
-    with plt.style.context("fast"):
+    with style():
         main()

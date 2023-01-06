@@ -17,26 +17,22 @@ save_dir = './vis/figures'
 logdir = "./logs"
 
 runs = {
-    "dcc10": {
-        r"$lr_D=4\times 10^{-4}$": "GN_cifar10_dcgan_lrx2_0",
-        r"$lr_D=2\times 10^{-4}$": "GN_cifar10_dcgan_lrx1_0",
-        r"$lr_D=1\times 10^{-4}$": "GN_cifar10_dcgan_lrx5e-1_0",
+    "rc10": {
+        "GN-GAN": "GN_cifar10_resnet_0",
+        "GN-GAN+rescale": "GN_cifar10_resnet_rescale0_xavier_0",
     },
-    "dcs10": {
-        r"$lr_D=4\times 10^{-4}$": "GN_stl10_dcgan_lrx2_0",
-        r"$lr_D=2\times 10^{-4}$": "GN_stl10_dcgan_lrx1_0",
-        r"$lr_D=1\times 10^{-4}$": "GN_stl10_dcgan_lrx5e-1_0",
+    "bc10": {
+        "GN-GAN": "GN_cifar10_biggan_0",
+        "GN-GAN+rescale": "GN_cifar10_biggan_rescale0_xavier_0",
     },
-    "rnc10": {
-        r"$lr_D=4\times 10^{-4}$": "GN_cifar10_resnet_lrx2_0",
-        r"$lr_D=2\times 10^{-4}$": "GN_cifar10_resnet_lrx1_0",
-        r"$lr_D=1\times 10^{-4}$": "GN_cifar10_resnet_lrx1e-5_0",
-    },
-    "rns10": {
-        r"$lr_D=4\times 10^{-4}$": "GN_stl10_resnet_lrx2_0",
-        r"$lr_D=2\times 10^{-4}$": "GN_stl10_resnet_lrx1_0",
-        r"$lr_D=1\times 10^{-4}$": "GN_stl10_resnet_lrx5e-1_0",
-    },
+    # "rs10": {
+    #     "GN-GAN": "GN_stl10_resnet_0",
+    #     "GN-GAN+rescale": "GN_stl10_resnet_rescale0_xavier_0",
+    # },
+    "rchu": {
+        "GN-GAN": "GN_church256_resnet_2",
+        "GN-GAN+rescale": "GN_church256_resnet_rescale0_xavier_0",
+    }
 }
 
 
@@ -98,9 +94,7 @@ def main():
                     (results['legend'], results['steps'], results['grad_norms']))
                 pbar.write(results['msg'])
 
-    ticks_fontsize = 35
-    legend_fontsize = 30
-    label_fontsize = 40
+    # ============================= plot =============================
 
     for name, data in plot_gn_data.items():
         plt.figure(figsize=(8, 7))
@@ -108,36 +102,29 @@ def main():
             x, y = downsample(x, y, 100)
             plt.plot(x, y, alpha=0.8, label=legend)
         plt.xlabel('Generator Updates')
+
         plt.yscale('log')
         plt.ylabel(r'$\Vert\nabla_xD(x)\Vert$')
-        plt.xticks(
-            ticks=[0, 100000, 200000],
-            labels=["0", "100k", "200k"])
-        plt.yticks(
-            ticks=[10 ** i for i in range(-3, 10, 2)],
-            labels=[r"$10^{%d}$" % i for i in range(-3, 10, 2)])
-        if name == 'rnc10':
-            yticks = range(-1, 10, 2)
-            plt.yticks(
-                ticks=[10 ** i for i in yticks],
-                labels=[r"$10^{%d}$" % i for i in yticks])
-            plt.ylim(10 ** -1, 10 ** 9)
-        elif name == 'rns10':
-            yticks = range(-1, 10, 2)
-            plt.yticks(
-                ticks=[10 ** i for i in yticks],
-                labels=[r"$10^{%d}$" % i for i in yticks])
-            plt.ylim(10 ** -1, 10 ** 10)
+        if max(x) <= 100000:
+            xticks = [0, 50000, 100000]
+            yticks = range(0, 19, 6)
+        elif max(x) <= 125000:
+            xticks = [0, 60000, 125000]
+            yticks = range(0, 9, 2)
         else:
-            plt.yticks(
-                ticks=[10 ** i for i in range(-3, 10, 2)],
-                labels=[r"$10^{%d}$" % i for i in range(-3, 10, 2)])
-            plt.ylim(10 ** -3, 10 ** 9)
-        plt.legend(framealpha=1.0)
+            xticks = [0, 100000, 200000]
+            yticks = range(-1, 10, 2)
+        plt.xticks(
+            ticks=xticks,
+            labels=[f"{i / 1000:.0f}k" for i in xticks])
+        plt.yticks(
+            ticks=[10 ** i for i in yticks],
+            labels=[r"$10^{%d}$" % i for i in yticks])
 
+        plt.legend(loc='lower center', bbox_to_anchor=(0.5, 1.0), ncol=3)
         plt.tight_layout()
-        plt.savefig(os.path.join(save_dir, f"vis_gn_{name}.png"))
-        print("Saved to", os.path.join(save_dir, f"vis_gn_{name}.png"))
+        plt.savefig(os.path.join(save_dir, f"vis_rescaled_gn_{name}.png"))
+        print("Saved to", os.path.join(save_dir, f"vis_rescaled_gn_{name}.png"))
 
 
 if __name__ == '__main__':

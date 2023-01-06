@@ -13,6 +13,8 @@ from training.datasets import Dataset
 from training.losses import wgan_loss_G
 from training.gn import normalize_D
 
+from vis.core import style
+
 
 device = torch.device('cuda:0')
 work_dir = os.path.dirname(__file__)
@@ -47,7 +49,6 @@ def extract_event_process(args):
     if os.path.exists(cache_path):
         x_fid, y_fid = torch.load(cache_path)
         msg = f"Load {legend}_{seed} from cache"
-        torch.save((x_fid, y_fid), cache_path)
     else:
         x_fid = []
         y_fid = []
@@ -87,16 +88,12 @@ def main():
                 vis_fid_data[results['legend']].append((results['x_fid'], results['y_fid']))
                 pbar.write(results['msg'])
 
-    ticks_fontsize = 25
-    legend_fontsize = 30
-    label_fontsize = 40
+    # ============================= plot =============================
 
-    plt.figure(figsize=(8, 7))
     for legend, steps_fids_list in vis_fid_data.items():
         avg_fids = defaultdict(list)
         for steps, fids in steps_fids_list:
             assert len(steps) == len(fids)
-            # fids = ema(fids)
             for step, fid in zip(steps, fids):
                 avg_fids[step].append(fid)
         x = []
@@ -114,24 +111,20 @@ def main():
             line_style = "-"
         else:
             line_style = "--"
-        plt.plot(x, y, line_style, label=legend, linewidth=3, alpha=0.8)
+        plt.plot(x, y, line_style, label=legend, linewidth=2, alpha=0.8)
         plt.fill_between(x, y + sigma, y - sigma, alpha=0.5)
 
     xticks = [0, 100000, 200000]
     xticks_label = ['%dk' % (x / 1000) for x in xticks]
-    plt.xticks(xticks, xticks_label, fontsize=ticks_fontsize)
-    plt.xlabel('Iteration', fontsize=label_fontsize)
+    plt.xticks(xticks, xticks_label)
+    plt.xlabel('Generator Updates')
 
     yticks = [0, 30, 60, 90]
-    plt.yticks(yticks, fontsize=ticks_fontsize)
+    plt.yticks(yticks)
     plt.ylim(10, 110)
-    plt.ylabel('FID', fontsize=label_fontsize, y=0.54)
+    plt.ylabel('FID')
 
-    plt.legend(
-        loc='lower center', fontsize=legend_fontsize,
-        ncol=3, columnspacing=0.7, handlelength=1.0, handletextpad=0.3,
-        bbox_to_anchor=(0.5, 1.0)
-    )
+    plt.legend(loc='lower center', bbox_to_anchor=(0.5, 1.0), ncol=3)
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, 'vis_fid.png'))
     print("Saved to", os.path.join(save_dir, 'vis_fid.png'))
@@ -140,12 +133,9 @@ def main():
 if __name__ == '__main__':
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = "1"
 
-    # sudo apt install texlive-latex-extra cm-super dvipng
-    plt.rcParams.update({
-        "text.usetex": True,
-        "font.family": "Helvetica",
-        'mathtext.fontset': 'stix',
-        'font.family': 'STIXGeneral',
-    })
-    with plt.style.context("fast"):
+
+if __name__ == '__main__':
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = "1"
+
+    with style():
         main()
