@@ -9,7 +9,7 @@ from torchvision.io.image import read_image
 if __name__ == '__main__':
     save_dir = './vis/figures'
     sample_dirs = {
-        # 'celebahq256.png': 'logs/GN_celebahq256_resnet_rescale1_0/generate',
+        'celebahq256.png': 'logs/GN_celebahq256_resnet_rescale1_0/generate',
         'church256.png': 'logs/GN_church256_resnet_rescale0_xavier_0/generate',
     }
     grid = 3

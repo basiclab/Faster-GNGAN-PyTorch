@@ -6,6 +6,7 @@ from tqdm import trange
 
 from training.gn import normalize_D
 from training.models import dcgan, resnet
+from training.losses import wgan_loss_D
 
 
 def si_format(v, unit=""):
@@ -76,7 +77,7 @@ def raw_D(D, x):
 
 
 def gn_D(D, x):
-    return normalize_D(D, x, None)[0]
+    return normalize_D(D, x, wgan_loss_D)[0]
 
 
 def estimate_time(G, D, shape_G, bs_G, forwar_D_fn, N):
@@ -126,7 +127,7 @@ def estimate_time(G, D, shape_G, bs_G, forwar_D_fn, N):
 
 
 def estimate_flops(G, D, shape_G, forwar_D_fn):
-    z = torch.randn(1, *shape_G, requires_grad=True).cuda()
+    z = torch.randn(2, *shape_G, requires_grad=True).cuda()
     with torch.profiler.profile(
         activities=[
             torch.profiler.ProfilerActivity.CPU,
@@ -180,10 +181,10 @@ def estimate_flops(G, D, shape_G, forwar_D_fn):
 
 if __name__ == '__main__':
     MODELS_ARGS = [
-        {
-            "G": (LinearGenerator, (32, None, 128), (128,), 128),
-            "D": (LinearDiscriminator, (32, None), (3, 32, 32,), 128),
-        },
+        # {
+        #     "G": (LinearGenerator, (32, None, 128), (128,), 128),
+        #     "D": (LinearDiscriminator, (32, None), (3, 32, 32,), 128),
+        # },
         {
             "G": (dcgan.Generator, (32, None, 128), (128,), 128),
             "D": (dcgan.Discriminator, (32, None), (3, 32, 32,), 128),
@@ -200,10 +201,10 @@ if __name__ == '__main__':
             "G": (resnet.Generator, (48, None, 128), (128,), 128),
             "D": (resnet.Discriminator, (48, None), (3, 48, 48,), 128),
         },
-        {
-            "G": (resnet.Generator, (256, None, 128), (128,), 8),
-            "D": (resnet.Discriminator, (256, None), (3, 256, 256,), 8),
-        },
+        # {
+        #     "G": (resnet.Generator, (256, None, 128), (128,), 8),
+        #     "D": (resnet.Discriminator, (256, None), (3, 256, 256,), 8),
+        # },
     ]
 
     N = 1000
@@ -219,7 +220,7 @@ if __name__ == '__main__':
         MODEL_D, ARGS_D, shape_D, bs_D = args['D']
         D = MODEL_D(*ARGS_D).cuda()
         params_D = 0
-        for param in G.parameters():
+        for param in D.parameters():
             params_D += param.numel()
         params_D = si_format(params_D)
 
@@ -231,24 +232,23 @@ if __name__ == '__main__':
         G.requires_grad_(True)
         D.requires_grad_(False)
 
-        forw_G, forw_D, back_G, back_D = estimate_flops(G, D, shape_G, raw_D)
-        print(f'Raw Complexity:')
-        print("\n".join([
-            f"    forw_G    : {forw_G}",
-            f"    forw_D    : {forw_D}",
-            f"    back_G    : {back_G}",
-            f"    back_D    : {back_D}",
-        ]))
-        forw_G, forw_D, back_G, back_D = estimate_flops(G, D, shape_G, gn_D)
-        print(f'GN Complexity:')
-        print("\n".join([
-            f"    forw_G    : {forw_G}",
-            f"    forw_D    : {forw_D}",
-            f"    back_G    : {back_G}",
-            f"    back_D    : {back_D}",
-        ]))
+        # forw_G, forw_D, back_G, back_D = estimate_flops(G, D, shape_G, raw_D)
+        # print(f'Raw Complexity:')
+        # print("\n".join([
+        #     f"    forw_G    : {forw_G}",
+        #     f"    forw_D    : {forw_D}",
+        #     f"    back_G    : {back_G}",
+        #     f"    back_D    : {back_D}",
+        # ]))
+        # forw_G, forw_D, back_G, back_D = estimate_flops(G, D, shape_G, gn_D)
+        # print(f'GN Complexity:')
+        # print("\n".join([
+        #     f"    forw_G    : {forw_G}",
+        #     f"    forw_D    : {forw_D}",
+        #     f"    back_G    : {back_G}",
+        #     f"    back_D    : {back_D}",
+        # ]))
 
-        # D = dcgan.Discriminator(32, None).cuda()
         forw_G, forw_D, back_G, back_D = estimate_time(G, D, shape_G, bs_G, raw_D, N)
         print("Raw Speed:")
         print("\n".join([
@@ -257,13 +257,12 @@ if __name__ == '__main__':
             f"    back_G    : {back_G * 1000 / (N + 1):.3f} (ms/iter)",
             f"    back_D    : {back_D * 1000 / (N + 1):.3f} (ms/iter)",
         ]))
-
-        forw_G, forw_D, back_G, back_D, = estimate_time(G, D, shape_G, bs_G, gn_D, N)
-        print("GN Speed:")
-        print("\n".join([
-            f"    forw_G    : {forw_G * 1000 / (N + 1):.3f} (ms/iter)",
-            f"    forw_D    : {forw_D * 1000 / (N + 1):.3f} (ms/iter)",
-            f"    back_G    : {back_G * 1000 / (N + 1):.3f} (ms/iter)",
-            f"    back_D    : {back_D * 1000 / (N + 1):.3f} (ms/iter)",
-        ]))
-        print('-' * 80)
+        # forw_G, forw_D, back_G, back_D, = estimate_time(G, D, shape_G, bs_G, gn_D, N)
+        # print("GN Speed:")
+        # print("\n".join([
+        #     f"    forw_G    : {forw_G * 1000 / (N + 1):.3f} (ms/iter)",
+        #     f"    forw_D    : {forw_D * 1000 / (N + 1):.3f} (ms/iter)",
+        #     f"    back_G    : {back_G * 1000 / (N + 1):.3f} (ms/iter)",
+        #     f"    back_D    : {back_D * 1000 / (N + 1):.3f} (ms/iter)",
+        # ]))
+        # print('-' * 80)

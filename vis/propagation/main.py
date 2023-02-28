@@ -133,7 +133,7 @@ def main():
     label_fontsize = 40
     markersize = 10
 
-    plt.figure("fw", figsize=(8, 7))
+    plt.figure("fw")
     lines = []
     legends = []
     for marker, (legend, (x, y, _)) in zip(markers, plot_fw_data.items()):
@@ -167,7 +167,7 @@ def main():
 
     # ============================= plot =============================
 
-    plt.figure("bw", figsize=(8, 7))
+    plt.figure("bw")
     lines = []
     legends = []
     for marker, (legend, (x, y, _)) in zip(markers, plot_bw_data.items()):

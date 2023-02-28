@@ -99,7 +99,7 @@ def main():
     # ============================= plot =============================
 
     fig, (ax1, ax2) = plt.subplots(
-        2, 1, gridspec_kw={'height_ratios': [9, 10]}, sharex=True, figsize=(8, 7))
+        2, 1, gridspec_kw={'height_ratios': [9, 10]}, sharex=True, figsize=(8, 6))
     for legend, (x, max_grad_norms) in plot_data.items():
         x = np.array(x)
         y = np.array(max_grad_norms)
@@ -133,7 +133,7 @@ def main():
     yticks = [0, 0.05, 0.1]
     ax2.set_yticks(yticks)
     ax2.set_ylim(-0.003, 0.11)
-    ax2.set_ylabel(r'$\max\Vert\nabla_x\hat{D}(x)\Vert$', y=1)
+    ax2.set_ylabel(r'$\max_x\Vert\nabla_x\hat{D}(x)\Vert$', y=1)
 
     # lower upper
     yticks = [0.7, 0.8, 0.9, 1.0]
@@ -143,10 +143,10 @@ def main():
     ax1.legend(loc='lower center', bbox_to_anchor=(0.5, 1), ncol=3)
 
     fig.subplots_adjust(
-        left=0.19,
-        bottom=0.15,
+        left=0.18,
+        bottom=0.17,
         right=0.97,
-        top=0.76,
+        top=0.73,
         wspace=0.0,
         hspace=0.1)
     fig.savefig(os.path.join(save_dir, 'vis_gnvssn.png'))

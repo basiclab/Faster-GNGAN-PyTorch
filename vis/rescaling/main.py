@@ -97,7 +97,7 @@ def main():
     # ============================= plot =============================
 
     for name, data in plot_gn_data.items():
-        plt.figure(figsize=(8, 7))
+        plt.figure()
         for legend, x, y in data:
             x, y = downsample(x, y, 100)
             plt.plot(x, y, alpha=0.8, label=legend)
@@ -106,13 +106,13 @@ def main():
         plt.yscale('log')
         plt.ylabel(r'$\Vert\nabla_xD(x)\Vert$')
         if max(x) <= 100000:
-            xticks = [0, 50000, 100000]
+            xticks = [0, 25000, 50000, 75000, 100000]
             yticks = range(0, 19, 6)
         elif max(x) <= 125000:
-            xticks = [0, 60000, 125000]
+            xticks = [0, 30000, 60000, 90000, 125000]
             yticks = range(0, 9, 2)
         else:
-            xticks = [0, 100000, 200000]
+            xticks = [0, 50000, 100000, 150000, 200000]
             yticks = range(-1, 10, 2)
         plt.xticks(
             ticks=xticks,

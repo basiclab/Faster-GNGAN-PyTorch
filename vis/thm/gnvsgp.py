@@ -109,7 +109,7 @@ def main():
     yticks = [0.5, 1.0, 1.5]
     plt.ylim(0.5, 1.5)
     plt.yticks(yticks)
-    plt.ylabel(r'$\max\Vert\nabla_x\hat{D}(x)\Vert$')
+    plt.ylabel(r'$\max_x\Vert\nabla_x\hat{D}(x)\Vert$')
 
     plt.legend(loc='lower center', bbox_to_anchor=(0.5, 1), ncol=2)
 

@@ -132,7 +132,6 @@ def main():
 
     # ============================= plot =============================
 
-    plt.figure(figsize=(8, 7))
     lines = []
     legends = []
     for marker, (legend, (x, max_grad_norms)) in zip(

@@ -97,7 +97,6 @@ def main():
     # Plot spectral norm
     bar_width = 0.35
 
-    plt.figure(figsize=(8, 7))
     for i, (legend, sn) in enumerate(vis_sn_data.items()):
         print(legend, ", ".join(f"{v:.3f}" for v in sn))
         r = np.arange(len(sn)) + i * bar_width

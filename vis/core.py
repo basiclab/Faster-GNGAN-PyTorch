@@ -52,7 +52,7 @@ def calc_grad_norm(D, x, is_GNGAN=False, step=20, lr=1000):
 
 
 @contextmanager
-def style(legend_fontsize=30, label_fontsize=40, ticks_labelsize=25):
+def style(legend_fontsize=30, label_fontsize=40, ticks_labelsize=25, **kwargs):
     plt.rcParams.update({
         # Latex font
         # sudo apt install texlive-latex-extra cm-super dvipng
@@ -61,7 +61,7 @@ def style(legend_fontsize=30, label_fontsize=40, ticks_labelsize=25):
         'font.family': 'STIXGeneral',
 
         # figsize
-        'figure.figsize': (8, 7),
+        'figure.figsize': (8, 6),
 
         # grid color and border color
         'axes.grid': True,
@@ -93,6 +93,9 @@ def style(legend_fontsize=30, label_fontsize=40, ticks_labelsize=25):
         # line and marker style
         'lines.linewidth': 3,
         'lines.markersize': 10,
+
+        # override default rcParams
+        **kwargs
     })
 
     with plt.style.context("fast"):

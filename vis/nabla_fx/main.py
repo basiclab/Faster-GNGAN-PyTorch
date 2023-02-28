@@ -103,7 +103,7 @@ def main():
     label_fontsize = 40
 
     for name, data in plot_gn_data.items():
-        plt.figure(figsize=(8, 7))
+        plt.figure()
         for legend, x, y in data:
             x, y = downsample(x, y, 100)
             plt.plot(x, y, alpha=0.8, label=legend)
@@ -143,5 +143,5 @@ def main():
 if __name__ == '__main__':
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = "1"
 
-    with style():
+    with style(legend_fontsize=28):
         main()
