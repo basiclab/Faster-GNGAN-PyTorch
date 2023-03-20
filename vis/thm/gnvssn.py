@@ -129,7 +129,7 @@ def main():
     xticks_label = ['%dk' % (x / 1000) for x in xticks]
     ax2.set_xticks(xticks)
     ax2.set_xticklabels(xticks_label)
-    ax2.set_xlabel('Generator Updates')
+    ax2.set_xlabel('Update Iteration (Generator)')
     yticks = [0, 0.05, 0.1]
     ax2.set_yticks(yticks)
     ax2.set_ylim(-0.003, 0.11)

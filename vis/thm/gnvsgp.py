@@ -104,7 +104,7 @@ def main():
     xticks = [0, 100000, 200000]
     xticks_label = ['%dk' % (x / 1000) for x in xticks]
     plt.xticks(xticks, xticks_label)
-    plt.xlabel('Generator Updates')
+    plt.xlabel('Update Iteration (Generator)')
 
     yticks = [0.5, 1.0, 1.5]
     plt.ylim(0.5, 1.5)

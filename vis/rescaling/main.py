@@ -101,7 +101,7 @@ def main():
         for legend, x, y in data:
             x, y = downsample(x, y, 100)
             plt.plot(x, y, alpha=0.8, label=legend)
-        plt.xlabel('Generator Updates')
+        plt.xlabel('Update Iteration (Generator)')
 
         plt.yscale('log')
         plt.ylabel(r'$\Vert\nabla_xD(x)\Vert$')
