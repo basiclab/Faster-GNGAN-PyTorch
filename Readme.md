@@ -1,6 +1,6 @@
-# Gradient Normalization for Generative Adversarial Networks
+# On the Effectiveness of Gradient Normalized Generative Adversarial Networks
 
-The authors' official implementation of Gradient Normalized GAN (GN-GAN).
+This is the official implementation of Faster Gradient Normalized GAN (Faster GN-GAN) by the authors.
 
 ## Requirements
 - CUDA 11.3
@@ -13,11 +13,11 @@ The authors' official implementation of Gradient Normalized GAN (GN-GAN).
 ## Datasets
 - CIFAR-10 and STL-10
 
-    We use the pytorch built-in dataset for CIFAR-10 and STL-10.
+    We use the PyTorch built-in dataset for CIFAR-10 and STL-10.
 
 - CelebA-HQ
 
-    We obtain celeba-hq from [this repository](https://github.com/suvojit-0x55aa/celebA-HQ-dataset-download) and preprocess them into `lmdb` format using following command:
+    We obtain CelebA-HQ from [this repository](https://github.com/suvojit-0x55aa/celebA-HQ-dataset-download) and preprocess them into `lmdb` format using the following command:
 
     ```
     python -m training.datasets --dataset celebahq/images --out ./data/celebahq
@@ -42,9 +42,9 @@ The authors' official implementation of Gradient Normalized GAN (GN-GAN).
 ```
 
 ## Preprocessing Datasets for FID
-- Download pre-calculated statistic from [here](https://drive.google.com/drive/folders/1UBdzl6GtNMwNQ5U-4ESlIer43tNjiGJC?usp=sharing) for calculating FID.
+- Download pre-calculated statistic from [here](https://drive.google.com/drive/folders/1UBdzl6GtNMwNQ5U-4ESlIer43tNjiGJC?usp=sharing) to calculating FID.
 
-- The folder structure:
+- The folder structure should be as follows:
     ```
     ./stats
     ├── celebahq.all.256.npz
@@ -56,7 +56,7 @@ The authors' official implementation of Gradient Normalized GAN (GN-GAN).
 
 **NOTE**
 
-All the reported values in our paper are calculated by official implementation of Inception Score and FID.
+All the values reported in our paper are calculated using the official implementation of Inception Score and FID.
 
 
 ## Training
