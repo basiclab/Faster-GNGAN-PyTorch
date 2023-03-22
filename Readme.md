@@ -3,8 +3,7 @@
 The authors' official implementation of Gradient Normalized GAN (GN-GAN).
 
 ## Requirements
-- CUDA 11.7
-- Python 3.9.12
+- CUDA 11.3
 - Python packages
     ```sh
     pip install -U pip setuptools
