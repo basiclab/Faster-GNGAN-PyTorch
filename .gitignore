@@ -23,3 +23,14 @@ _cache_*
 
 # visulaization data
 vis/
+
+# configs
+configs/**/*.json
+
+# redundant .py
+training/models/*.py
+!training/models/base.py
+!training/models/biggan.py
+!training/models/dcgan.py
+!training/models/resnet.py
+gn_unittest.py

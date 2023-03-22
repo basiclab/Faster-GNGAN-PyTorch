@@ -1,6 +1,7 @@
 import copy
 import json
 import os
+from typing import Union
 
 import torch
 import torchvision
@@ -208,7 +209,7 @@ def training_loop(
     cr_lambda: float,       # Consistency regularization gamma.
     gp0_lambda: float,      # 0 Gradient penalty gamma.
     gp1_lambda: float,      # 1 Gradient penalty gamma.
-    rescale_alpha: float,   # Alpha parameter of the rescaling.
+    scale: float,           # Parameter of the rescaling.
     ema_decay: float,       # Decay rate of the exponential moving average.
     ema_start: int,         # Start iteration of the exponential moving average.
     sample_step: int,       # Sample from fixed z every sample_step iterations.
@@ -343,11 +344,11 @@ def training_loop(
         # Update D.
         D.requires_grad_(True)
         for _ in range(step_D):
-            if rescale_alpha is not None:
+            if scale is not None:
                 if isinstance(D, DistributedDataParallel):
-                    D.module.rescale(alpha=rescale_alpha)
+                    D.module.rescale(scale=scale)
                 else:
-                    D.rescale(alpha=rescale_alpha)
+                    D.rescale(scale=scale)
             for i in range(accumulation):
                 with dist.ddp_sync(D, sync=(i == accumulation - 1)):
                     train_D(loader, meter, D, G, loss_fn_D, normalize_fn_D, **kwargs)

@@ -16,22 +16,22 @@ class Reshape(nn.Module):
 
 
 class Rescalable(nn.Module):
-    def rescale(self, base_scale=1., alpha=1.):
+    def rescale(self, base_scale=1., scale=1.):
         raise NotImplementedError()
 
 
 class RescalableSequentialModel(Rescalable):
-    def expand(self, p, base_scale, alpha):
+    def expand(self, p, base_scale, scale):
         """Sequentially expand chidren modules."""
         for m in p.children():
             if isinstance(m, Rescalable):
-                base_scale = m.rescale(base_scale, alpha)
+                base_scale = m.rescale(base_scale, scale)
             else:
-                base_scale = self.expand(m, base_scale, alpha)
+                base_scale = self.expand(m, base_scale, scale)
         return base_scale
 
-    def rescale(self, base_scale=1., alpha=1.):
-        base_scale = self.expand(self, base_scale, alpha)
+    def rescale(self, base_scale=1., scale=1.):
+        base_scale = self.expand(self, base_scale, scale)
         return base_scale
 
 
@@ -42,18 +42,18 @@ class RescalableResBlock(Rescalable):
         self.shortcut_scale = 1
 
     @torch.no_grad()
-    def rescale(self, base_scale, alpha=1.):
+    def rescale(self, base_scale, scale=1.):
         assert hasattr(self, 'shortcut'), ".shortcut is not defined in the derived class of RescalableResBlock"
         assert hasattr(self, 'main'), ".main is not defined in the derived class of RescalableResBlock"
         residual_scale = base_scale
         for module in self.main.modules():
             if isinstance(module, RescalableWrapper):
-                residual_scale = module.rescale(residual_scale, alpha)
+                residual_scale = module.rescale(residual_scale, scale)
 
         shortcut_scale = base_scale
         for module in self.shortcut.modules():
             if isinstance(module, RescalableWrapper):
-                shortcut_scale = module.rescale(shortcut_scale, alpha)
+                shortcut_scale = module.rescale(shortcut_scale, scale)
         self.shortcut_scale = residual_scale / shortcut_scale
 
         return residual_scale
@@ -84,10 +84,10 @@ class RescalableWrapper(Rescalable):
         setattr(self.module, name, params.data)
 
     @torch.no_grad()
-    def rescale(self, base_scale=1., alpha=1.):
+    def rescale(self, base_scale=1., scale=1.):
         if 'weight_raw' in self.module._parameters:
-            if alpha > 0:
-                self.module.weight_scale = alpha * self.module.weight_norm / (
+            if scale > 0:
+                self.module.weight_scale = scale * self.module.weight_norm / (
                     self.module.weight_raw.norm(p=2) + 1e-12)
             else:
                 fan_in, fan_out = _calculate_fan_in_and_fan_out(self.module.weight_raw)

@@ -208,10 +208,10 @@ class RescalableDiscriminator(RescalableSequentialModel):
         super().__init__()
         self.emb_scale_gain = 1
 
-    def rescale_model(self, base_scale=1., alpha=1.):
-        base_scale = self.expand(self.main, base_scale, alpha)
-        lin_scale = self.linear.rescale(base_scale, alpha)
-        emb_scale = self.embedding.rescale(base_scale, alpha)
+    def rescale_model(self, base_scale=1., scale=1.):
+        base_scale = self.expand(self.main, base_scale, scale)
+        lin_scale = self.linear.rescale(base_scale, scale)
+        emb_scale = self.embedding.rescale(base_scale, scale)
         self.emb_scale_gain = lin_scale / emb_scale
         return lin_scale
 

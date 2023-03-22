@@ -38,7 +38,7 @@ from training import misc
 @click.option('--gp0_lambda', default=0.0)
 @click.option('--gp1_lambda', default=0.0)
 @click.option('--gn_impl', type=click.Choice(['norm_G', 'norm_D']), default='norm_G')
-@click.option('--rescale_alpha', default=None, type=float)
+@click.option('--scale', default=None, type=float)
 @click.option('--ema_decay', default=0.9999)
 @click.option('--ema_start', default=0)
 @click.option('--sample_step', default=500)
