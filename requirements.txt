@@ -1,6 +1,6 @@
 click
 lmdb
-pytorch-gan-metrics
+pytorch-gan-metrics==0.5.3
 tqdm
 tensorboard
 tensorboardX
